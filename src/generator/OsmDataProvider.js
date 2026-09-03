@@ -978,6 +978,37 @@ export class OsmDataProvider {
     return nearest;
   }
 
+  getSectorInfo(worldX, worldZ) {
+    const SECTOR_SIZE = 600;
+    const sx = Math.floor(worldX / SECTOR_SIZE);
+    const sz = Math.floor(worldZ / SECTOR_SIZE);
+    const key = `${sx},${sz}`;
+
+    const centerX = (sx + 0.5) * SECTOR_SIZE;
+    const centerZ = (sz + 0.5) * SECTOR_SIZE;
+    const latOffset = -centerZ / 110540;
+    const lonOffset = centerX / (111320 * Math.cos(this.anchorLat * Math.PI / 180));
+    const targetLat = this.anchorLat + latOffset;
+    const targetLon = this.anchorLon + lonOffset;
+
+    let status = 'Ожидает приближения';
+    if (this.fetchedSectors.has(key)) {
+      status = 'Загружен (в памяти / кэше)';
+    } else if (this.activeFetches.has(key)) {
+      status = 'Скачивается по сети (HTTP in-flight)...';
+    } else if (this.queuedSectors.has(key)) {
+      const idx = this.requestQueue.findIndex(t => t.sectorKey === key);
+      status = idx >= 0 ? `В очереди (#${idx + 1})` : 'В очереди';
+    }
+
+    return {
+      sectorKey: key,
+      sx, sz,
+      targetLat, targetLon,
+      status
+    };
+  }
+
   /**
    * Find building/road/POI feature at world coordinates (worldX, worldZ)
    */
@@ -1131,13 +1162,14 @@ export class OsmDataProvider {
 
       // Check if aiming at an unloaded warning hazard sector
       if (!this.isPointInLoadedSector(worldX, worldZ)) {
+        const info = this.getSectorInfo(worldX, worldZ);
         return {
-          name: '⚠️ Зона загрузки OSM',
-          address: 'Ожидание геоданных OpenStreetMap...',
+          name: `⚠️ Сектор OSM [${info.sx}, ${info.sz}]`,
+          address: `${info.status} • GPS: ${info.targetLat.toFixed(4)}°, ${info.targetLon.toFixed(4)}°`,
           city: null,
           levels: 0,
           height: 0,
-          buildingType: 'Непрогруженный сектор',
+          buildingType: 'Гео-ресурс Overpass (600×600 м)',
           amenity: 'warning',
           pois: []
         };
