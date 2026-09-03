@@ -234,39 +234,41 @@ html, body {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 }
 
-/* Top Navigation Bar */
-#top-bar {
-  display: flex;
+/* Compact Top-Left Brand & Search */
+.brand-search-bar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 8px 16px;
-  max-width: 1400px;
-  margin: 0 auto;
-  width: 100%;
+  gap: 12px;
+  padding: 6px 12px;
+  z-index: 30;
+  width: auto;
 }
 
-.brand {
+.brand-search-bar .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-weight: 700;
-  font-size: 1.25rem;
-  letter-spacing: 1.5px;
+  font-size: 1.1rem;
+  letter-spacing: 1px;
   color: var(--accent-cyan);
-  text-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+  white-space: nowrap;
 }
 
-.brand-icon {
-  width: 26px;
-  height: 26px;
+.brand-search-bar .brand-icon {
+  width: 22px;
+  height: 22px;
   background: linear-gradient(135deg, var(--accent-cyan), #818cf8);
   border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
-  font-size: 14px;
+  font-size: 12px;
   color: #000;
   font-weight: bold;
 }
@@ -276,18 +278,19 @@ html, body {
   position: relative;
 }
 
-.search-container {
+.brand-search-bar .search-container {
   display: flex;
   align-items: center;
   background: rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 6px;
-  padding: 4px 10px;
-  width: 420px;
+  padding: 4px 8px;
+  width: 260px;
   transition: all 0.2s ease;
 }
 
-.search-container:focus-within {
+.brand-search-bar .search-container:focus-within {
+  width: 340px;
   border-color: var(--accent-cyan);
   box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
 }
@@ -377,22 +380,36 @@ html, body {
   max-width: 260px;
 }
 
-/* Top Left Stack: Speedometer & Environment (Equal Width) */
-.top-left-stack {
+/* Top-Right Stack: Status, Speedometer, Time of Day (Equal Width) */
+.top-right-stack {
   position: absolute;
-  top: 76px;
-  left: 16px;
+  top: 16px;
+  right: 16px;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 8px;
   width: 280px;
   z-index: 25;
 }
 
-.top-left-stack .speedometer-card,
-.top-left-stack .controls-card {
+.top-right-stack .status-pill,
+.top-right-stack .speedometer-card,
+.top-right-stack .controls-card {
   width: 100%;
   box-sizing: border-box;
+}
+
+.top-right-stack .status-pill {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-main);
+  background: rgba(10, 15, 29, 0.88);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
 /* Speedometer Card */
@@ -555,13 +572,21 @@ html, body {
   color: var(--accent-amber);
 }
 
-/* Bottom Bar */
+/* Bottom Bar: 3-column layout (Left: GPS, Center: Mode, Right: Target Card) */
 #bottom-bar {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: flex-end;
   gap: 16px;
   width: 100%;
+}
+
+.telemetry-card {
+  justify-self: start;
+}
+
+.target-card {
+  justify-self: end;
 }
 
 /* Mode & Controls Hint Badge */

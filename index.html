@@ -15,34 +15,37 @@
 
   <!-- HUD Interface Layer -->
   <div id="hud-layer">
-    <!-- Top Bar: Search & Cities -->
-    <header id="top-bar" class="glass-panel hud-interactive">
+    <!-- Top-Left: Compact Brand & Search Bar (No empty space) -->
+    <div id="brand-search-bar" class="brand-search-bar glass-panel hud-interactive">
       <div class="brand">
         <div class="brand-icon">■</div>
         <span>PIXEL PLANET</span>
       </div>
 
-      <!-- City / Landmark Search -->
       <div class="search-wrapper">
         <form id="search-form" class="search-container" onsubmit="return false;">
           <input
             id="search-input"
             type="text"
             class="search-input"
-            placeholder="Поиск города или улицы (напр. ул. Пушкина)..."
+            placeholder="Поиск города или улицы..."
             autocomplete="off"
           />
           <button id="search-btn" class="search-btn" type="submit">GO</button>
         </form>
-        <!-- Search Suggestions / Results Dropdown -->
         <div id="search-dropdown" class="search-dropdown" style="display: none;"></div>
       </div>
+    </div>
 
-    </header>
+    <!-- Top-Right Stack: Status/Cache (top), Speedometer (mid), Time of Day (bottom) -->
+    <div id="top-right-stack" class="top-right-stack hud-interactive">
+      <!-- 1. Cache & OSM Network Status Indicator (Topmost) -->
+      <div class="status-pill glass-panel">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">Инициализация воксельного мира...</span>
+      </div>
 
-    <!-- Top Left Stack: Speedometer & Time of Day (Equal Width) -->
-    <div id="top-left-stack" class="top-left-stack hud-interactive">
-      <!-- Speedometer Card -->
+      <!-- 2. Speedometer Card -->
       <div class="speedometer-card glass-panel">
         <div class="hud-card-header">
           <span class="hud-card-title">СКОРОСТЬ ПОЛЕТА</span>
@@ -56,7 +59,7 @@
         </div>
       </div>
 
-      <!-- Time of Day & Render Distance Card -->
+      <!-- 3. Time of Day & Render Distance Card -->
       <div class="controls-card glass-panel">
         <div class="hud-card-header">
           <span class="hud-card-title">ВРЕМЯ СУТОК</span>
@@ -77,7 +80,7 @@
       </div>
     </div>
 
-    <!-- Bottom Bar: GPS Telemetry (Left), Controls Hint (Center), Target & Status (Right) -->
+    <!-- Bottom Bar: GPS Telemetry (Left), Controls Hint (Center), Target Inspection (Right) -->
     <footer id="bottom-bar">
       <!-- Left: GPS & Flight Telemetry Block -->
       <div class="telemetry-card glass-panel hud-interactive">
@@ -108,40 +111,31 @@
         </div>
       </div>
 
-      <!-- Mode & Controls Hint -->
+      <!-- Center: Controls Mode Hint -->
       <div id="cursor-mode-badge" class="cursor-badge cursor-active glass-panel hud-interactive">
         РЕЖИМ: КУРСОР [ЛКМ - ПОЛЕТ | ENTER или / - ПОИСК]
       </div>
 
-      <!-- Right Column: Target Card Stacked Over Status Pill -->
-      <div class="bottom-right-stack hud-interactive">
-        <!-- Building Target Inspection Card -->
-        <div id="target-card" class="target-card glass-panel" style="display: none;">
-          <div class="target-header">
-            <div class="target-indicator-dot"></div>
-            <span class="target-badge">ОБЪЕКТ В ПРИЦЕЛЕ</span>
-            <span id="target-dist" class="target-dist">0 м</span>
-          </div>
-          <div id="target-name" class="target-title">Здание</div>
-          <div class="target-address-row">
-            <span class="target-icon">📍</span>
-            <span id="target-address" class="target-address">Адрес загружается...</span>
-          </div>
-          <div class="target-meta-row">
-            <span id="target-levels" class="target-meta-pill">3 этажа</span>
-            <span id="target-height" class="target-meta-pill">14 м</span>
-            <span id="target-type" class="target-meta-pill">Городское здание</span>
-          </div>
-
-          <!-- POIs / Venues / Shops / Fastfood inside building -->
-          <div id="target-pois" class="target-pois-row" style="display: none;"></div>
+      <!-- Right: Building Target Inspection Card in Bottom-Right Corner -->
+      <div id="target-card" class="target-card glass-panel hud-interactive" style="display: none;">
+        <div class="target-header">
+          <div class="target-indicator-dot"></div>
+          <span class="target-badge">ОБЪЕКТ В ПРИЦЕЛЕ</span>
+          <span id="target-dist" class="target-dist">0 м</span>
+        </div>
+        <div id="target-name" class="target-title">Здание</div>
+        <div class="target-address-row">
+          <span class="target-icon">📍</span>
+          <span id="target-address" class="target-address">Адрес загружается...</span>
+        </div>
+        <div class="target-meta-row">
+          <span id="target-levels" class="target-meta-pill">3 этажа</span>
+          <span id="target-height" class="target-meta-pill">14 м</span>
+          <span id="target-type" class="target-meta-pill">Городское здание</span>
         </div>
 
-        <!-- Status Pill -->
-        <div class="status-pill glass-panel">
-          <div class="status-dot" id="status-dot"></div>
-          <span id="status-text">Инициализация воксельного мира...</span>
-        </div>
+        <!-- POIs / Venues / Shops / Fastfood inside building -->
+        <div id="target-pois" class="target-pois-row" style="display: none;"></div>
       </div>
     </footer>
   </div>
