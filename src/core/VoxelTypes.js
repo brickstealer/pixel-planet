@@ -25,6 +25,8 @@ export const BlockType = {
   ROAD_MARKING: 18,
   MONUMENT_BRONZE: 19,
   GOLD: 20,
+  WARNING_YELLOW: 21,
+  WARNING_BLACK: 22,
 };
 
 // RGB Colors in [0..1] range for vertex colors
@@ -50,6 +52,8 @@ export const BlockPalette = {
   [BlockType.METAL]: [0.45, 0.48, 0.52],
   [BlockType.MONUMENT_BRONZE]: [0.62, 0.46, 0.28],
   [BlockType.GOLD]: [0.95, 0.78, 0.24],
+  [BlockType.WARNING_YELLOW]: [0.98, 0.80, 0.08], // Bright industrial warning yellow
+  [BlockType.WARNING_BLACK]: [0.10, 0.10, 0.12],  // Industrial hazard black
 };
 
 // Return whether block is transparent/non-solid to neighbor face culling

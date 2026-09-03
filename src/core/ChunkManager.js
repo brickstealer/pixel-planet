@@ -3,7 +3,8 @@ import {
   CHUNK_SIZE_X,
   CHUNK_SIZE_Y,
   CHUNK_SIZE_Z,
-  VOXEL_SIZE
+  VOXEL_SIZE,
+  BlockType
 } from './VoxelTypes.js';
 import { VoxelMesher } from './VoxelMesher.js';
 
@@ -139,11 +140,42 @@ export class ChunkManager {
       usedOsm = this.osmProvider.populateChunk(cx, cz, voxels);
     }
 
-    // If no OSM buildings exist at this location (e.g. countryside, ocean, forest), generate procedural landscape
+    // If no OSM buildings exist at this location, check if it's an unloaded pending sector
     if (!usedOsm) {
-      const procVoxels = this.terrainGen.generateChunk(cx, cz);
-      // Copy procedural voxels
-      voxels.set(procVoxels);
+      const startX = cx * CHUNK_SIZE_X * VOXEL_SIZE;
+      const startZ = cz * CHUNK_SIZE_Z * VOXEL_SIZE;
+      const midX = startX + (CHUNK_SIZE_X * VOXEL_SIZE) / 2;
+      const midZ = startZ + (CHUNK_SIZE_Z * VOXEL_SIZE) / 2;
+
+      const isLoadedSector = this.osmProvider ? this.osmProvider.isPointInLoadedSector(midX, midZ) : false;
+
+      if (!isLoadedSector) {
+        // UNLOADED OSM SECTOR: Generate Yellow & Black Hazard Striped Warning Tiles!
+        const groundY = 20;
+        for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+          const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+            const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+
+            // Solid bedrock/dirt base underneath
+            for (let y = 0; y < groundY; y++) {
+              const idx = (y * CHUNK_SIZE_Z + lz) * CHUNK_SIZE_X + lx;
+              voxels[idx] = y > groundY - 3 ? BlockType.DIRT : BlockType.STONE;
+            }
+
+            // Diagonal Hazard Warning Stripes (45 degrees, width = 4 meters / 2 voxels)
+            const stripeIndex = Math.floor((worldVX + worldVZ) / 4.0);
+            const isYellow = Math.abs(stripeIndex) % 2 === 0;
+
+            const topIdx = (groundY * CHUNK_SIZE_Z + lz) * CHUNK_SIZE_X + lx;
+            voxels[topIdx] = isYellow ? BlockType.WARNING_YELLOW : BlockType.WARNING_BLACK;
+          }
+        }
+      } else {
+        // Loaded sector with naturally no buildings (e.g. countryside, ocean): procedural terrain
+        const procVoxels = this.terrainGen.generateChunk(cx, cz);
+        voxels.set(procVoxels);
+      }
     }
 
     // Build optimized 3D geometry

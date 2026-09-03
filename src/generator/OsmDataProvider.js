@@ -1129,6 +1129,20 @@ export class OsmDataProvider {
         };
       }
 
+      // Check if aiming at an unloaded warning hazard sector
+      if (!this.isPointInLoadedSector(worldX, worldZ)) {
+        return {
+          name: '⚠️ Зона загрузки OSM',
+          address: 'Ожидание геоданных OpenStreetMap...',
+          city: null,
+          levels: 0,
+          height: 0,
+          buildingType: 'Непрогруженный сектор',
+          amenity: 'warning',
+          pois: []
+        };
+      }
+
       return null;
     }
 
