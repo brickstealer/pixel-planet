@@ -104,14 +104,20 @@ export class FlightControls {
         return;
       }
 
+      // Protect against accidental Ctrl+W browser tab closure
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyW') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
       switch (e.code) {
         case 'KeyW': case 'ArrowUp': this.keys.forward = true; break;
         case 'KeyS': case 'ArrowDown': this.keys.backward = true; break;
         case 'KeyA': case 'ArrowLeft': this.keys.left = true; break;
         case 'KeyD': case 'ArrowRight': this.keys.right = true; break;
         case 'Space': this.keys.up = true; break;
-        case 'ShiftLeft': case 'KeyC': this.keys.down = true; break;
-        case 'KeyE': case 'ControlLeft': this.keys.boost = true; break;
+        case 'KeyC': this.keys.down = true; break;
+        case 'ShiftLeft': case 'ShiftRight': case 'KeyE': this.keys.boost = true; break;
       }
     });
 
@@ -126,8 +132,8 @@ export class FlightControls {
         case 'KeyA': case 'ArrowLeft': this.keys.left = false; break;
         case 'KeyD': case 'ArrowRight': this.keys.right = false; break;
         case 'Space': this.keys.up = false; break;
-        case 'ShiftLeft': case 'KeyC': this.keys.down = false; break;
-        case 'KeyE': case 'ControlLeft': this.keys.boost = false; break;
+        case 'KeyC': this.keys.down = false; break;
+        case 'ShiftLeft': case 'ShiftRight': case 'KeyE': this.keys.boost = false; break;
       }
     });
 

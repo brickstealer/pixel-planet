@@ -492,7 +492,14 @@ function savePlayerState() {
   }
 }
 
-window.addEventListener('beforeunload', savePlayerState);
+window.addEventListener('beforeunload', (e) => {
+  savePlayerState();
+  if (controls && controls.isLocked) {
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  }
+});
 
 async function bootApp() {
   let restored = false;
