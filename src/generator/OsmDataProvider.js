@@ -192,6 +192,12 @@ export class OsmDataProvider {
         node["shop"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         node["tourism"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         node["historic"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["natural"="tree"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        way["natural"="tree_row"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        way["natural"="wood"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        relation["natural"="wood"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        way["landuse"="forest"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        relation["landuse"="forest"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         node["railway"="subway_entrance"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         node["station"="subway"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         way["station"="subway"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
@@ -202,7 +208,7 @@ export class OsmDataProvider {
 
     let success = false;
     let fromCache = false;
-    const cacheKey = `osm_v2_${south.toFixed(4)}_${west.toFixed(4)}_${north.toFixed(4)}_${east.toFixed(4)}`;
+    const cacheKey = `osm_v3_${south.toFixed(4)}_${west.toFixed(4)}_${north.toFixed(4)}_${east.toFixed(4)}`;
 
     // 1. Check local IndexedDB disk cache
     const cachedData = await this.cache.get(cacheKey);
@@ -319,6 +325,34 @@ export class OsmDataProvider {
 
           this.addFeatureToSpatialBuckets(poi);
           this.features.push(poi);
+        }
+
+        // 1.1 Process Standalone Trees (natural=tree)
+        if (tags.natural === 'tree') {
+          const mx = (elem.lon - this.anchorLon) * (111320 * Math.cos(this.anchorLat * Math.PI / 180));
+          const mz = -(elem.lat - this.anchorLat) * 110540;
+
+          const parsedH = parseFloat(tags.height);
+          const heightMeters = (!isNaN(parsedH) && parsedH > 2 && parsedH < 35) ? parsedH : 6;
+          const species = tags['species:ru'] || tags.species || tags.genus || tags['name:ru'] || tags.name || 'Дерево';
+          const isConifer = tags.leaf_type === 'needleleaved' ||
+                            species.toLowerCase().includes('picea') ||
+                            species.toLowerCase().includes('ель') ||
+                            species.toLowerCase().includes('сосна');
+
+          const treeFeat = {
+            id: elem.id,
+            type: 'tree',
+            x: mx,
+            z: mz,
+            height: heightMeters,
+            species: species,
+            leafType: isConifer ? 'needleleaved' : 'broadleaved',
+            bounds: [mx - 4, mz - 4, mx + 4, mz + 4]
+          };
+
+          this.addFeatureToSpatialBuckets(treeFeat);
+          this.features.push(treeFeat);
         }
         continue;
       }
@@ -440,10 +474,36 @@ export class OsmDataProvider {
           this.addFeatureToSpatialBuckets(feature);
           this.features.push(feature);
 
-        } else if (tags.leisure === 'park' || tags.leisure === 'garden' || tags.landuse === 'grass') {
+        } else if (tags.natural === 'tree_row') {
+          for (let i = 0; i < pts.length - 1; i++) {
+            const p1 = pts[i];
+            const p2 = pts[i + 1];
+            const segDist = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+            const steps = Math.max(1, Math.round(segDist / 9));
+            for (let s = 0; s <= steps; s++) {
+              const t = s / steps;
+              const tx = p1[0] + (p2[0] - p1[0]) * t;
+              const tz = p1[1] + (p2[1] - p1[1]) * t;
+              const treeFeat = {
+                id: `${elem.id}_row_${i}_${s}`,
+                type: 'tree',
+                x: tx,
+                z: tz,
+                height: 7,
+                species: tags['species:ru'] || tags.species || 'Аллея деревьев',
+                leafType: tags.leaf_type || 'broadleaved',
+                bounds: [tx - 4, tz - 4, tx + 4, tz + 4]
+              };
+              this.addFeatureToSpatialBuckets(treeFeat);
+              this.features.push(treeFeat);
+            }
+          }
+
+        } else if (tags.leisure === 'park' || tags.leisure === 'garden' || tags.landuse === 'grass' || tags.natural === 'wood' || tags.landuse === 'forest') {
+          const isForest = (tags.natural === 'wood' || tags.landuse === 'forest');
           const feature = {
             id: elem.id,
-            type: 'park',
+            type: isForest ? 'forest' : 'park',
             points: pts,
             bounds: [minX, minZ, maxX, maxZ]
           };
@@ -591,7 +651,8 @@ export class OsmDataProvider {
             }
           }
         }
-      } else if (feat.type === 'park') {
+      } else if (feat.type === 'park' || feat.type === 'forest') {
+        const isForest = (feat.type === 'forest');
         for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
           const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
           for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
@@ -599,6 +660,34 @@ export class OsmDataProvider {
             if (this.pointInPolygon(worldVX, worldVZ, feat.points)) {
               hasFeatures = true;
               setBlock(lx, groundY, lz, BlockType.GRASS);
+
+              // Inside dense forests, populate natural tree stands
+              if (isForest) {
+                const spacing = 8;
+                const cellX = Math.floor(worldVX / spacing);
+                const cellZ = Math.floor(worldVZ / spacing);
+                const hash = Math.sin(cellX * 12.9898 + cellZ * 78.233) * 43758.5453;
+                const rand = Math.abs(hash - Math.floor(hash));
+
+                if (rand > 0.4 && (Math.abs(Math.floor(worldVX)) % spacing === 0) && (Math.abs(Math.floor(worldVZ)) % spacing === 0)) {
+                  const trunkH = 3 + Math.floor(rand * 3);
+                  for (let ty = groundY + 1; ty <= groundY + trunkH; ty++) {
+                    setBlock(lx, ty, lz, BlockType.TREE_TRUNK);
+                  }
+                  const cY = groundY + trunkH;
+                  for (let dy = -1; dy <= 2; dy++) {
+                    const r = (dy === -1 || dy === 2) ? 1 : 2;
+                    for (let ox = -r; ox <= r; ox++) {
+                      for (let oz = -r; oz <= r; oz++) {
+                        if (r === 2 && Math.abs(ox) === 2 && Math.abs(oz) === 2) continue;
+                        if (getBlock(lx + ox, cY + dy, lz + oz) === BlockType.AIR) {
+                          setBlock(lx + ox, cY + dy, lz + oz, BlockType.TREE_LEAVES);
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -754,6 +843,60 @@ export class OsmDataProvider {
         }
         // Glowing metro entrance sign
         setBlock(lx, groundY + 2, lz + 1, BlockType.WINDOW_LIT);
+      }
+    }
+
+    // 5. Rasterize Real Trees from OSM (natural=tree and natural=tree_row)
+    for (const feat of nearbyFeatures) {
+      if (feat.type !== 'tree') continue;
+
+      const lx = Math.floor((feat.x - startX) / VOXEL_SIZE);
+      const lz = Math.floor((feat.z - startZ) / VOXEL_SIZE);
+
+      if (lx < -1 || lx > CHUNK_SIZE_X || lz < -1 || lz > CHUNK_SIZE_Z) continue;
+
+      // Don't plant tree on roads or in water
+      const currentGround = getBlock(lx, groundY, lz);
+      if (currentGround === BlockType.ROAD || currentGround === BlockType.WATER) continue;
+
+      hasFeatures = true;
+      const trunkHeight = Math.max(2, Math.min(6, Math.floor(feat.height / VOXEL_SIZE)));
+      const canopyY = groundY + trunkHeight;
+
+      // 5.1 Wood Trunk
+      for (let ty = groundY + 1; ty <= canopyY; ty++) {
+        setBlock(lx, ty, lz, BlockType.TREE_TRUNK);
+      }
+
+      // 5.2 Tree Canopy Foliage
+      const isConifer = (feat.leafType === 'needleleaved');
+
+      if (isConifer) {
+        // Conical tree shape (ель, сосна)
+        for (let dy = 0; dy <= 3; dy++) {
+          const r = (dy === 0) ? 2 : (dy === 1 ? 1 : 0);
+          for (let ox = -r; ox <= r; ox++) {
+            for (let oz = -r; oz <= r; oz++) {
+              if (r === 2 && Math.abs(ox) === 2 && Math.abs(oz) === 2) continue;
+              if (getBlock(lx + ox, canopyY + dy, lz + oz) === BlockType.AIR) {
+                setBlock(lx + ox, canopyY + dy, lz + oz, BlockType.TREE_LEAVES);
+              }
+            }
+          }
+        }
+      } else {
+        // Fluffy rounded canopy (липа, дуб, клен, береза)
+        for (let dy = -1; dy <= 2; dy++) {
+          const r = (dy === -1 || dy === 2) ? 1 : 2;
+          for (let ox = -r; ox <= r; ox++) {
+            for (let oz = -r; oz <= r; oz++) {
+              if (r === 2 && Math.abs(ox) === 2 && Math.abs(oz) === 2 && dy !== 0) continue;
+              if (getBlock(lx + ox, canopyY + dy, lz + oz) === BlockType.AIR) {
+                setBlock(lx + ox, canopyY + dy, lz + oz, BlockType.TREE_LEAVES);
+              }
+            }
+          }
+        }
       }
     }
 
@@ -959,6 +1102,33 @@ export class OsmDataProvider {
           pois: nearbyPois
         };
       }
+
+      // Check if aiming at a real tree from OSM
+      let targetTree = null;
+      let minTreeDist = Infinity;
+      for (const feat of candidates) {
+        if (feat.type === 'tree') {
+          const d = Math.hypot(worldX - feat.x, worldZ - feat.z);
+          if (d < minTreeDist && d < 6.0) {
+            minTreeDist = d;
+            targetTree = feat;
+          }
+        }
+      }
+
+      if (targetTree) {
+        return {
+          name: `🌳 ${targetTree.species}`,
+          address: nearestStreetName ? `ок. ${nearestStreetName}` : `Высота: ${Math.round(targetTree.height)} м`,
+          city: null,
+          levels: 1,
+          height: Math.round(targetTree.height),
+          buildingType: 'Дерево / Зеленые насаждения',
+          amenity: 'tree',
+          pois: []
+        };
+      }
+
       return null;
     }
 
