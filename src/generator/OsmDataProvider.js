@@ -334,6 +334,15 @@ export class OsmDataProvider {
     return { success, fromCache };
   }
 
+  isDesertRegion() {
+    const lat = this.anchorLat;
+    const lon = this.anchorLon;
+    // Egypt (Cairo, Giza, Luxor), Arabian Peninsula (Dubai, Riyadh), Sahara
+    const isEgypt = (lat >= 21 && lat <= 33 && lon >= 24 && lon <= 36);
+    const isArabia = (lat >= 12 && lat <= 33 && lon >= 36 && lon <= 60);
+    return isEgypt || isArabia;
+  }
+
   /**
    * Process raw Overpass data with geom arrays (both ways & relation multipolygons & POI nodes)
    */
@@ -493,15 +502,32 @@ export class OsmDataProvider {
           else if (street) fullAddress = street;
           else if (houseNumber) fullAddress = `д. ${houseNumber}`;
 
+          // Pyramid check: tag historic=pyramid, roof:shape=pyramid, building:shape=pyramid, or name containing "пирамида" / "pyramid"
+          const nameLower = (tags['name:ru'] || tags.name || tags['name:en'] || '').toLowerCase();
+          const isPyramid = tags.historic === 'pyramid' ||
+                            tags.man_made === 'pyramid' ||
+                            tags['building:shape'] === 'pyramid' ||
+                            tags['roof:shape'] === 'pyramid' ||
+                            tags.ruins === 'pyramid' ||
+                            nameLower.includes('пирамида') ||
+                            nameLower.includes('pyramid') ||
+                            nameLower.includes('хеопс') ||
+                            nameLower.includes('хефрен') ||
+                            nameLower.includes('микерин') ||
+                            nameLower.includes('cheops') ||
+                            nameLower.includes('khufu');
+
           // Material Palette based on real OSM tags
           let blockType = BlockType.BUILDING_CONCRETE;
           const mat = (tags['building:material'] || '').toLowerCase();
-          if (mat.includes('brick') || tags.building === 'house') {
+          if (isPyramid) {
+            blockType = BlockType.SAND; // Ancient limestone / sandstone
+          } else if (mat.includes('brick') || tags.building === 'house') {
             blockType = BlockType.BUILDING_BRICK;
-          } else if (mat.includes('glass') || heightMeters > 38) {
+          } else if (mat.includes('glass') || (heightMeters > 38 && !this.isDesertRegion())) {
             blockType = BlockType.BUILDING_GLASS;
-          } else if (mat.includes('stone')) {
-            blockType = BlockType.STONE;
+          } else if (mat.includes('stone') || this.isDesertRegion()) {
+            blockType = BlockType.SAND;
           }
 
           const feature = {
@@ -509,11 +535,12 @@ export class OsmDataProvider {
             name: tags['name:ru'] || tags.name || tags['name:en'] || null,
             address: fullAddress,
             city: city,
-            levels: levels,
+            levels: isPyramid ? 1 : levels,
             height: Math.round(heightMeters),
-            buildingType: tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание'),
+            buildingType: isPyramid ? 'Древняя пирамида' : (tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание')),
             amenity: tags.amenity || tags.shop || tags.tourism || null,
             type: 'building',
+            isPyramid: isPyramid,
             points: pts,
             blockType: blockType,
             bounds: [minX, minZ, maxX, maxZ]
@@ -685,11 +712,14 @@ export class OsmDataProvider {
       return voxels[idx];
     };
 
-    // 1. Fill ground base with sidewalk / urban pavement
+    // 1. Fill ground base: Desert sand in Egypt/Arabia, urban sidewalk in cities
+    const groundBlock = this.isDesertRegion() ? BlockType.SAND : BlockType.SIDEWALK;
+    const subGroundBlock = this.isDesertRegion() ? BlockType.SAND : BlockType.DIRT;
+
     for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
         for (let y = 0; y <= groundY; y++) {
-          setBlock(lx, y, lz, y === groundY ? BlockType.SIDEWALK : (y > groundY - 3 ? BlockType.DIRT : BlockType.STONE));
+          setBlock(lx, y, lz, y === groundY ? groundBlock : (y > groundY - 3 ? subGroundBlock : BlockType.STONE));
         }
       }
     }
@@ -812,6 +842,43 @@ export class OsmDataProvider {
       const bCenterX = (minBX + maxBX) / 2;
       const bCenterZ = (minBZ + maxBZ) / 2;
       const isSmall = (maxBX - minBX < 6 || maxBZ - minBZ < 6);
+
+      // 3.1 Special Architecture: Ancient Stepped/Sloping Pyramids
+      if (feat.isPyramid) {
+        const halfWidth = (maxBX - minBX) / 2;
+        const halfDepth = (maxBZ - minBZ) / 2;
+
+        for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+          const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+          if (worldVX < minBX - VOXEL_SIZE || worldVX > maxBX + VOXEL_SIZE) continue;
+
+          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+            const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+            if (worldVZ < minBZ - VOXEL_SIZE || worldVZ > maxBZ + VOXEL_SIZE) continue;
+
+            const dx = Math.abs(worldVX - bCenterX);
+            const dz = Math.abs(worldVZ - bCenterZ);
+
+            for (let by = groundY; by <= groundY + bHeightVoxels; by++) {
+              const t = (by - groundY) / bHeightVoxels; // 0.0 at base -> 1.0 at peak
+              const curLimitX = Math.max(1.0, halfWidth * (1.0 - t));
+              const curLimitZ = Math.max(1.0, halfDepth * (1.0 - t));
+
+              if (dx <= curLimitX && dz <= curLimitZ) {
+                const isApex = (by >= groundY + bHeightVoxels - 2);
+                if (isApex) {
+                  // Golden pyramidion capstone at apex
+                  setBlock(lx, by, lz, BlockType.GOLD);
+                } else {
+                  // Ancient weathered sandstone / limestone
+                  setBlock(lx, by, lz, BlockType.SAND);
+                }
+              }
+            }
+          }
+        }
+        continue;
+      }
 
       for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
         const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
