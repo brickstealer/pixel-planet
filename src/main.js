@@ -13,7 +13,7 @@ const camera = new THREE.PerspectiveCamera(
   70,
   window.innerWidth / window.innerHeight,
   0.5,
-  1200
+  4500
 );
 camera.position.set(0, 75, 0); // Start flying above city
 
@@ -240,14 +240,37 @@ timeButtons.forEach(btn => {
   btn.addEventListener('click', () => setTimeOfDay(btn.dataset.time));
 });
 
-// Render Distance Slider
+// Render Distance Slider (supports up to 100 chunks = 3.2+ km view distance)
 const renderSlider = document.getElementById('render-dist-slider');
 const renderLabel = document.getElementById('render-dist-val');
-renderSlider.addEventListener('input', (e) => {
-  const val = parseInt(e.target.value, 10);
-  chunkManager.renderDistance = val;
-  renderLabel.textContent = `${val} чанков`;
-});
+
+function updateRenderDistance(val) {
+  const r = parseInt(val, 10);
+  chunkManager.renderDistance = r;
+  if (renderLabel) renderLabel.textContent = `${r} чанков`;
+
+  // 1 chunk = 32 meters
+  const viewDistMeters = r * CHUNK_SIZE_X * VOXEL_SIZE;
+
+  // Scale camera far clipping plane so all chunks up to 100 are rendered
+  camera.far = Math.max(2500, viewDistMeters * 1.5);
+  camera.updateProjectionMatrix();
+
+  // Adjust fog density so the horizon fades naturally at the edge of the render distance
+  if (scene.fog) {
+    scene.fog.density = 2.4 / (viewDistMeters * 1.15);
+  }
+
+  // Invalidate lastPlayerChunk to trigger immediate streaming around player
+  chunkManager.lastPlayerChunk = { cx: null, cz: null };
+  chunkManager.update(camera.position, controls.getLookDirection());
+}
+
+if (renderSlider) {
+  renderSlider.addEventListener('input', (e) => {
+    updateRenderDistance(e.target.value);
+  });
+}
 
 // Start button click & instructions dismiss
 const instructionsOverlay = document.getElementById('instructions-overlay');

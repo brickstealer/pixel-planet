@@ -265,13 +265,15 @@ export class OsmDataProvider {
         node["station"="subway"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         way["station"="subway"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         node["railway"="station"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["natural"="peak"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["natural"="volcano"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
       );
       out geom;
     `.trim();
 
     let success = false;
     let fromCache = false;
-    const cacheKey = `osm_v3_${south.toFixed(4)}_${west.toFixed(4)}_${north.toFixed(4)}_${east.toFixed(4)}`;
+    const cacheKey = `osm_v4_${south.toFixed(4)}_${west.toFixed(4)}_${north.toFixed(4)}_${east.toFixed(4)}`;
 
     // 1. Check local IndexedDB disk cache
     const cachedData = await this.cache.get(cacheKey);
@@ -439,6 +441,35 @@ export class OsmDataProvider {
           this.addFeatureToSpatialBuckets(treeFeat);
           this.features.push(treeFeat);
         }
+
+        // 1.2 Process Mountain Peaks & Volcanoes (natural=peak, natural=volcano)
+        if (tags.natural === 'peak' || tags.natural === 'volcano' || tags.volcano === 'yes') {
+          const mx = (elem.lon - this.anchorLon) * (111320 * Math.cos(this.anchorLat * Math.PI / 180));
+          const mz = -(elem.lat - this.anchorLat) * 110540;
+
+          const parsedEle = parseFloat(tags.ele);
+          const eleMeters = (!isNaN(parsedEle) && parsedEle > 50) ? parsedEle : 1200;
+          const peakName = tags['name:ru'] || tags.name || tags['name:en'] || (tags.natural === 'volcano' ? 'Вулкан' : 'Горная вершина');
+          const isVolcano = tags.natural === 'volcano' || tags.volcano === 'yes' || peakName.toLowerCase().includes('везувий') || peakName.toLowerCase().includes('вулкан');
+
+          // Mountain footprint radius in meters (from 700m up to 2600m for giants like Everest)
+          const radiusMeters = Math.min(2600, Math.max(700, eleMeters * 0.35));
+
+          const peakFeat = {
+            id: elem.id,
+            type: 'peak',
+            name: peakName,
+            ele: Math.round(eleMeters),
+            isVolcano: isVolcano,
+            x: mx,
+            z: mz,
+            radius: radiusMeters,
+            bounds: [mx - radiusMeters, mz - radiusMeters, mx + radiusMeters, mz + radiusMeters]
+          };
+
+          this.addFeatureToSpatialBuckets(peakFeat);
+          this.features.push(peakFeat);
+        }
         continue;
       }
 
@@ -517,11 +548,37 @@ export class OsmDataProvider {
                             nameLower.includes('cheops') ||
                             nameLower.includes('khufu');
 
+          // Cathedral / Church / Temple detection
+          const isSaintBasils = nameLower.includes('василия блаженного') ||
+                                nameLower.includes('покровский собор') ||
+                                (tags['addr:street'] && tags['addr:street'].includes('Красная') && tags['addr:housenumber'] === '2');
+
+          const isCathedral = isSaintBasils ||
+                              tags.amenity === 'place_of_worship' ||
+                              tags.building === 'cathedral' ||
+                              tags.building === 'church' ||
+                              tags.building === 'chapel' ||
+                              tags.building === 'temple' ||
+                              tags.building === 'mosque' ||
+                              tags.building === 'monastery' ||
+                              tags.historic === 'monastery' ||
+                              tags.historic === 'church' ||
+                              nameLower.includes('собор') ||
+                              nameLower.includes('храм') ||
+                              nameLower.includes('церковь') ||
+                              nameLower.includes('cathedral') ||
+                              nameLower.includes('basilica') ||
+                              nameLower.includes('church');
+
           // Material Palette based on real OSM tags
           let blockType = BlockType.BUILDING_CONCRETE;
           const mat = (tags['building:material'] || '').toLowerCase();
           if (isPyramid) {
             blockType = BlockType.SAND; // Ancient limestone / sandstone
+          } else if (isSaintBasils) {
+            blockType = BlockType.BUILDING_BRICK; // Russian red brick
+          } else if (isCathedral) {
+            blockType = (mat.includes('brick') || mat.includes('red')) ? BlockType.BUILDING_BRICK : BlockType.BUILDING_CONCRETE;
           } else if (mat.includes('brick') || tags.building === 'house') {
             blockType = BlockType.BUILDING_BRICK;
           } else if (mat.includes('glass') || (heightMeters > 38 && !this.isDesertRegion())) {
@@ -535,12 +592,14 @@ export class OsmDataProvider {
             name: tags['name:ru'] || tags.name || tags['name:en'] || null,
             address: fullAddress,
             city: city,
-            levels: isPyramid ? 1 : levels,
+            levels: (isPyramid || isCathedral) ? 1 : levels,
             height: Math.round(heightMeters),
-            buildingType: isPyramid ? 'Древняя пирамида' : (tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание')),
+            buildingType: isPyramid ? 'Древняя пирамида' : (isSaintBasils ? 'Храм Василия Блаженного (Покровский собор)' : (isCathedral ? 'Православный собор / храм' : (tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание')))),
             amenity: tags.amenity || tags.shop || tags.tourism || null,
             type: 'building',
             isPyramid: isPyramid,
+            isCathedral: isCathedral,
+            isSaintBasils: isSaintBasils,
             points: pts,
             blockType: blockType,
             bounds: [minX, minZ, maxX, maxZ]
@@ -712,14 +771,84 @@ export class OsmDataProvider {
       return voxels[idx];
     };
 
-    // 1. Fill ground base: Desert sand in Egypt/Arabia, urban sidewalk in cities
+    // 1. Fill ground base (with dynamic mountain peaks and volcanic relief)
     const groundBlock = this.isDesertRegion() ? BlockType.SAND : BlockType.SIDEWALK;
     const subGroundBlock = this.isDesertRegion() ? BlockType.SAND : BlockType.DIRT;
 
-    for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
-      for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-        for (let y = 0; y <= groundY; y++) {
-          setBlock(lx, y, lz, y === groundY ? groundBlock : (y > groundY - 3 ? subGroundBlock : BlockType.STONE));
+    const peaks = nearbyFeatures.filter(f => f.type === 'peak');
+
+    if (peaks.length > 0) {
+      hasFeatures = true;
+      const peak = peaks[0];
+
+      // Elevation scaling: Everest (8848m) -> 135 voxels (270m tall), Vesuvius (1281m) -> 85 voxels (170m tall)
+      const maxMountainH = Math.min(135, Math.max(55, Math.round(peak.ele / 50)));
+
+      for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+        const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+        for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+          const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+          const dist = Math.hypot(worldVX - peak.x, worldVZ - peak.z);
+
+          if (dist < peak.radius) {
+            const ratio = dist / peak.radius; // 0 at summit -> 1 at base
+            const baseSlope = Math.pow(1.0 - ratio, 1.8);
+
+            // Natural alpine ridges, crags and couloirs
+            const ridgeNoise = Math.sin(worldVX * 0.035 + worldVZ * 0.03) * 8 +
+                               Math.cos(worldVX * 0.07 - worldVZ * 0.065) * 4;
+
+            let mountainH = Math.floor(groundY + (maxMountainH * baseSlope) + ridgeNoise);
+
+            // Caldera crater formation for volcanoes (e.g. Mount Vesuvius)
+            if (peak.isVolcano) {
+              const craterRadius = 45; // 45m crater rim
+              if (dist < craterRadius) {
+                const craterDrop = (1.0 - dist / craterRadius) * 22; // 22 voxels deep crater
+                mountainH = Math.max(groundY + 12, mountainH - craterDrop);
+              }
+            }
+
+            mountainH = Math.max(groundY, Math.min(CHUNK_SIZE_Y - 4, mountainH));
+
+            for (let y = 0; y <= mountainH; y++) {
+              if (y === mountainH) {
+                if (peak.ele > 3200 || y > groundY + maxMountainH * 0.55) {
+                  // Perennial snow and glacier cap
+                  setBlock(lx, y, lz, BlockType.SNOW);
+                } else if (peak.isVolcano && dist < 50) {
+                  // Volcanic basalt / dark ash
+                  setBlock(lx, y, lz, dist < 18 ? BlockType.WARNING_BLACK : BlockType.STONE);
+                } else if (y < groundY + 8) {
+                  setBlock(lx, y, lz, groundBlock);
+                } else {
+                  setBlock(lx, y, lz, BlockType.STONE);
+                }
+              } else if (y > mountainH - 3) {
+                if (peak.ele > 3200 || y > groundY + maxMountainH * 0.55) {
+                  setBlock(lx, y, lz, BlockType.SNOW);
+                } else {
+                  setBlock(lx, y, lz, BlockType.STONE);
+                }
+              } else {
+                setBlock(lx, y, lz, BlockType.STONE);
+              }
+            }
+          } else {
+            // Outside mountain radius: flat ground base
+            for (let y = 0; y <= groundY; y++) {
+              setBlock(lx, y, lz, y === groundY ? groundBlock : (y > groundY - 3 ? subGroundBlock : BlockType.STONE));
+            }
+          }
+        }
+      }
+    } else {
+      // Normal flat base ground
+      for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+        for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+          for (let y = 0; y <= groundY; y++) {
+            setBlock(lx, y, lz, y === groundY ? groundBlock : (y > groundY - 3 ? subGroundBlock : BlockType.STONE));
+          }
         }
       }
     }
@@ -872,6 +1001,80 @@ export class OsmDataProvider {
                 } else {
                   // Ancient weathered sandstone / limestone
                   setBlock(lx, by, lz, BlockType.SAND);
+                }
+              }
+            }
+          }
+        }
+        continue;
+      }
+
+      // 3.2 Special Architecture: Cathedrals, Churches & Russian Orthodox Domes (Купола)
+      if (feat.isCathedral) {
+        const halfWidth = (maxBX - minBX) / 2;
+        const halfDepth = (maxBZ - minBZ) / 2;
+        const domeHeight = Math.min(12, Math.max(5, Math.floor(bHeightVoxels * 0.35)));
+        const wallHeight = bHeightVoxels - domeHeight;
+
+        for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+          const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+          if (worldVX < minBX - VOXEL_SIZE || worldVX > maxBX + VOXEL_SIZE) continue;
+
+          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+            const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+            if (worldVZ < minBZ - VOXEL_SIZE || worldVZ > maxBZ + VOXEL_SIZE) continue;
+
+            const isInside = this.pointInPolygon(worldVX, worldVZ, feat.points) ||
+              (isSmall && Math.abs(worldVX - bCenterX) <= VOXEL_SIZE && Math.abs(worldVZ - bCenterZ) <= VOXEL_SIZE);
+
+            if (isInside) {
+              const isPerimeter = isSmall ? true : this.isPerimeterVoxel(worldVX, worldVZ, feat.points, VOXEL_SIZE);
+              const dxRatio = Math.abs(worldVX - bCenterX) / (halfWidth || 1);
+              const dzRatio = Math.abs(worldVZ - bCenterZ) / (halfDepth || 1);
+              const distFromCenter = Math.hypot(dxRatio, dzRatio);
+
+              for (let by = groundY; by <= groundY + bHeightVoxels; by++) {
+                if (by <= groundY + wallHeight) {
+                  // Cathedral / Church walls: Red brick or white stone
+                  if (isPerimeter) {
+                    const isBelt = (by === groundY + wallHeight || by === groundY + Math.floor(wallHeight / 2));
+                    const isArch = ((by - groundY) % 6 >= 2 && (by - groundY) % 6 <= 4 && (lx + lz) % 4 === 0);
+                    if (isBelt) {
+                      setBlock(lx, by, lz, BlockType.BUILDING_CONCRETE); // White stone decorative cornices
+                    } else if (isArch) {
+                      setBlock(lx, by, lz, BlockType.WINDOW_LIT); // Cathedral warm stained glass
+                    } else {
+                      setBlock(lx, by, lz, feat.blockType);
+                    }
+                  } else {
+                    setBlock(lx, by, lz, feat.blockType);
+                  }
+                } else {
+                  // Russian Orthodox Onion Dome / Cupola (Купол)
+                  const domeY = by - (groundY + wallHeight);
+                  const domeT = domeY / domeHeight; // 0..1
+
+                  // Onion / bulb dome curvature profile
+                  const bulbRadius = Math.sin(domeT * Math.PI) * 0.4 + (1.0 - domeT) * 0.75;
+
+                  if (distFromCenter <= bulbRadius) {
+                    if (domeY >= domeHeight - 2) {
+                      // Golden cross and spire tip
+                      setBlock(lx, by, lz, BlockType.GOLD);
+                    } else {
+                      // Colorful / Golden patterned cupola
+                      const angle = Math.atan2(worldVZ - bCenterZ, worldVX - bCenterX);
+                      const stripe = Math.sin(angle * 4 + domeY * 1.5);
+                      if (feat.isSaintBasils) {
+                        if (stripe > 0.25) setBlock(lx, by, lz, BlockType.GOLD);
+                        else if (stripe < -0.25) setBlock(lx, by, lz, BlockType.TREE_LEAVES); // emerald green
+                        else setBlock(lx, by, lz, BlockType.BUILDING_BRICK); // bright red
+                      } else {
+                        // Golden Orthodox dome
+                        setBlock(lx, by, lz, BlockType.GOLD);
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -1238,8 +1441,22 @@ export class OsmDataProvider {
       }
     }
 
-    // If no building, check if aiming at a standalone monument, outdoor venue, or subway entrance
+    // If no building, check if aiming at a mountain peak, standalone monument, or subway entrance
     if (!targetBuilding) {
+      const nearbyPeak = candidates.find(f => f.type === 'peak' && Math.hypot(worldX - f.x, worldZ - f.z) < f.radius);
+      if (nearbyPeak) {
+        return {
+          id: nearbyPeak.id,
+          name: nearbyPeak.isVolcano ? `🌋 ${nearbyPeak.name}` : `🏔️ ${nearbyPeak.name}`,
+          address: `Высота: ${nearbyPeak.ele} м над уровнем моря`,
+          city: null,
+          levels: 1,
+          height: nearbyPeak.ele,
+          buildingType: nearbyPeak.isVolcano ? 'Действующий стратовулкан' : 'Горная вершина',
+          pois: []
+        };
+      }
+
       if (nearbyPois.length > 0) {
         const p = nearbyPois[0];
 

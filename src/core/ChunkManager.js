@@ -15,12 +15,12 @@ export class ChunkManager {
     this.osmProvider = osmProvider;
     this.material = material;
 
-    this.renderDistance = 6; // Radius in chunks
-    this.activeChunks = new Map(); // "cx,cz" -> { mesh, voxels, cx, cz }
+    this.renderDistance = 10; // Chunks radius (default 10, configurable up to 100)
+    this.activeChunks = new Map(); // key -> { cx, cz, mesh, voxels, usedOsm }
     this.buildQueue = []; // Chunks queued to be built
     this.lastPlayerChunk = { cx: null, cz: null };
 
-    this.maxChunksPerFrame = 4; // Process 4 chunks per frame for faster streaming
+    this.maxChunksPerFrame = 6; // Base chunks built per frame
     this.totalVoxelsRendered = 0;
   }
 
@@ -124,8 +124,10 @@ export class ChunkManager {
 
   processQueue() {
     let buildsThisFrame = 0;
+    // Adaptive build budget: scale up if queue is large for high render distances
+    const batchLimit = Math.min(24, Math.max(this.maxChunksPerFrame, Math.floor(this.buildQueue.length / 25)));
 
-    while (this.buildQueue.length > 0 && buildsThisFrame < this.maxChunksPerFrame) {
+    while (this.buildQueue.length > 0 && buildsThisFrame < batchLimit) {
       const task = this.buildQueue.shift();
       if (this.activeChunks.has(task.key)) continue;
 
@@ -196,6 +198,8 @@ export class ChunkManager {
         0,
         cz * CHUNK_SIZE_Z * VOXEL_SIZE
       );
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.scene.add(mesh);
@@ -232,6 +236,8 @@ export class ChunkManager {
                 0,
                 chunk.cz * CHUNK_SIZE_Z * VOXEL_SIZE
               );
+              mesh.matrixAutoUpdate = false;
+              mesh.updateMatrix();
               this.scene.add(mesh);
               chunk.mesh = mesh;
             }
