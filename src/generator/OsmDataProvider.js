@@ -58,7 +58,7 @@ export class OsmDataProvider {
   async searchLocation(query) {
     try {
       this.statusMessage = `Поиск "${query}"...`;
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=8&addressdetails=1`;
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=8&addressdetails=1&accept-language=ru,en`;
       const res = await fetch(url, {
         headers: { 'Accept-Language': 'ru,en' }
       });
