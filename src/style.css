@@ -311,60 +311,7 @@ html, body {
   font-weight: 600;
 }
 
-.search-dropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  width: 100%;
-  min-width: 420px;
-  max-height: 380px;
-  overflow-y: auto;
-  background: rgba(10, 15, 29, 0.95);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(56, 189, 248, 0.4);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-}
 
-.search-dropdown-item {
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.search-dropdown-item:last-child {
-  border-bottom: none;
-}
-
-.search-dropdown-item:hover, .search-dropdown-item.active {
-  background: rgba(56, 189, 248, 0.18);
-  border-left: 3px solid var(--accent-cyan);
-}
-
-.search-dropdown-title {
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.search-dropdown-subtitle {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 .loc-subtitle {
   font-size: 0.75rem;

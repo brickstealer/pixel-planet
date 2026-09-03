@@ -154,161 +154,43 @@ async function teleportToCity(city) {
   savePlayerState();
 }
 
-// Search Bar Handling (Nominatim Geocoding with Live Autocomplete)
+// Search Bar Handling: searches strictly whatever user typed on Enter / GO
 const searchForm = document.getElementById('search-form');
 const searchInput = document.getElementById('search-input');
-const searchDropdown = document.getElementById('search-dropdown');
-let searchDebounceTimer = null;
-let currentSearchResults = [];
 
-let selectedDropdownIndex = -1;
-
-function updateDropdownHighlight() {
-  if (!searchDropdown) return;
-  const items = searchDropdown.querySelectorAll('.search-dropdown-item');
-  items.forEach((item, idx) => {
-    item.classList.toggle('active', idx === selectedDropdownIndex);
-  });
-}
-
-function hideSearchDropdown() {
-  selectedDropdownIndex = -1;
-  if (searchDropdown) {
-    searchDropdown.style.display = 'none';
-    searchDropdown.innerHTML = '';
-  }
-}
-
-function showSearchResults(results) {
-  currentSearchResults = results;
-  selectedDropdownIndex = -1; // Reset selection so typing doesn't auto-pick
-  if (!searchDropdown || !results || results.length === 0) {
-    hideSearchDropdown();
-    return;
-  }
-
-  searchDropdown.innerHTML = results.map((item, idx) => `
-    <div class="search-dropdown-item" data-idx="${idx}">
-      <div class="search-dropdown-title">
-        <span>📍</span>
-        <span>${item.title}</span>
-      </div>
-      <div class="search-dropdown-subtitle">${item.subtitle}</div>
-    </div>
-  `).join('');
-
-  searchDropdown.style.display = 'flex';
-
-  searchDropdown.querySelectorAll('.search-dropdown-item').forEach(el => {
-    el.addEventListener('click', () => {
-      const idx = parseInt(el.dataset.idx, 10);
-      selectSearchResult(results[idx]);
-    });
-  });
-}
-
-async function selectSearchResult(target) {
-  hideSearchDropdown();
-  searchInput.value = target.title;
-  searchInput.blur();
-
-  const customCity = {
-    name: target.title,
-    title: target.title,
-    subtitle: target.subtitle,
-    lat: target.lat,
-    lon: target.lon,
-    zoomDesc: target.subtitle
-  };
-
-  await teleportToCity(customCity);
-
-  setTimeout(() => {
-    renderer.domElement.requestPointerLock();
-  }, 350);
-}
-
-// Clicking on search input ensures pointer lock is released
+// Clicking on search input ensures pointer lock is released for typing
 searchInput.addEventListener('focus', () => {
   if (document.pointerLockElement) {
     document.exitPointerLock();
   }
-  if (currentSearchResults.length > 0) {
-    searchDropdown.style.display = 'flex';
-  }
 });
 
-// Arrow key navigation inside suggestions
-searchInput.addEventListener('keydown', (e) => {
-  if (searchDropdown.style.display !== 'none' && currentSearchResults.length > 0) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      selectedDropdownIndex = (selectedDropdownIndex + 1) % currentSearchResults.length;
-      updateDropdownHighlight();
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      selectedDropdownIndex = (selectedDropdownIndex - 1 + currentSearchResults.length) % currentSearchResults.length;
-      updateDropdownHighlight();
-      return;
-    }
-    if (e.key === 'Escape') {
-      hideSearchDropdown();
-      return;
-    }
-  }
-});
-
-// Live typing suggestions with debounce
-searchInput.addEventListener('input', (e) => {
-  const query = e.target.value.trim();
-  clearTimeout(searchDebounceTimer);
-  selectedDropdownIndex = -1;
-
-  if (query.length < 2) {
-    hideSearchDropdown();
-    return;
-  }
-
-  searchDebounceTimer = setTimeout(async () => {
-    const results = await osmProvider.searchLocation(query);
-    if (results && results.length > 0) {
-      showSearchResults(results);
-    } else {
-      hideSearchDropdown();
-    }
-  }, 300);
-});
-
-// Close dropdown on outside click
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.search-wrapper')) {
-    hideSearchDropdown();
-  }
-});
-
-// Form submission on Enter: search EXACTLY what user typed unless an option was explicitly picked
+// Form submission on Enter or clicking GO: search strictly the user input
 searchForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const query = searchInput.value.trim();
   if (!query) return;
 
-  clearTimeout(searchDebounceTimer);
-
-  // If user explicitly highlighted an item using Arrow keys, use that item
-  if (selectedDropdownIndex >= 0 && currentSearchResults[selectedDropdownIndex]) {
-    selectSearchResult(currentSearchResults[selectedDropdownIndex]);
-    return;
-  }
-
-  // Otherwise, user pressed Enter directly on what they typed: search exact query!
-  hideSearchDropdown();
+  searchInput.blur();
   updateStatus(`Поиск "${query}" на планете...`);
 
   const results = await osmProvider.searchLocation(query);
   if (results && results.length > 0) {
-    selectSearchResult(results[0]);
+    const target = results[0];
+    const customCity = {
+      name: target.title,
+      title: target.title,
+      subtitle: target.subtitle,
+      lat: target.lat,
+      lon: target.lon,
+      zoomDesc: target.subtitle
+    };
+
+    await teleportToCity(customCity);
+
+    setTimeout(() => {
+      renderer.domElement.requestPointerLock();
+    }, 350);
   } else {
     updateStatus(`Место "${query}" не найдено. Уточните название.`);
   }
