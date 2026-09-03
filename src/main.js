@@ -161,7 +161,18 @@ const searchDropdown = document.getElementById('search-dropdown');
 let searchDebounceTimer = null;
 let currentSearchResults = [];
 
+let selectedDropdownIndex = -1;
+
+function updateDropdownHighlight() {
+  if (!searchDropdown) return;
+  const items = searchDropdown.querySelectorAll('.search-dropdown-item');
+  items.forEach((item, idx) => {
+    item.classList.toggle('active', idx === selectedDropdownIndex);
+  });
+}
+
 function hideSearchDropdown() {
+  selectedDropdownIndex = -1;
   if (searchDropdown) {
     searchDropdown.style.display = 'none';
     searchDropdown.innerHTML = '';
@@ -170,6 +181,7 @@ function hideSearchDropdown() {
 
 function showSearchResults(results) {
   currentSearchResults = results;
+  selectedDropdownIndex = -1; // Reset selection so typing doesn't auto-pick
   if (!searchDropdown || !results || results.length === 0) {
     hideSearchDropdown();
     return;
@@ -226,10 +238,33 @@ searchInput.addEventListener('focus', () => {
   }
 });
 
+// Arrow key navigation inside suggestions
+searchInput.addEventListener('keydown', (e) => {
+  if (searchDropdown.style.display !== 'none' && currentSearchResults.length > 0) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedDropdownIndex = (selectedDropdownIndex + 1) % currentSearchResults.length;
+      updateDropdownHighlight();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedDropdownIndex = (selectedDropdownIndex - 1 + currentSearchResults.length) % currentSearchResults.length;
+      updateDropdownHighlight();
+      return;
+    }
+    if (e.key === 'Escape') {
+      hideSearchDropdown();
+      return;
+    }
+  }
+});
+
 // Live typing suggestions with debounce
 searchInput.addEventListener('input', (e) => {
   const query = e.target.value.trim();
   clearTimeout(searchDebounceTimer);
+  selectedDropdownIndex = -1;
 
   if (query.length < 2) {
     hideSearchDropdown();
@@ -253,25 +288,29 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// Form submission on Enter
+// Form submission on Enter: search EXACTLY what user typed unless an option was explicitly picked
 searchForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const query = searchInput.value.trim();
   if (!query) return;
 
   clearTimeout(searchDebounceTimer);
-  updateStatus(`Поиск "${query}" на планете...`);
 
-  if (currentSearchResults.length > 0) {
-    selectSearchResult(currentSearchResults[0]);
+  // If user explicitly highlighted an item using Arrow keys, use that item
+  if (selectedDropdownIndex >= 0 && currentSearchResults[selectedDropdownIndex]) {
+    selectSearchResult(currentSearchResults[selectedDropdownIndex]);
     return;
   }
+
+  // Otherwise, user pressed Enter directly on what they typed: search exact query!
+  hideSearchDropdown();
+  updateStatus(`Поиск "${query}" на планете...`);
 
   const results = await osmProvider.searchLocation(query);
   if (results && results.length > 0) {
     selectSearchResult(results[0]);
   } else {
-    updateStatus('Место не найдено. Уточните город (напр: "ул. Пушкина, Казань")');
+    updateStatus(`Место "${query}" не найдено. Уточните название.`);
   }
 });
 
