@@ -1,0 +1,54 @@
+export const CHUNK_SIZE_X = 16;
+export const CHUNK_SIZE_Z = 16;
+export const CHUNK_SIZE_Y = 160; // Up to 320 meters tall for real skyscrapers
+export const VOXEL_SIZE = 2.0; // 1 voxel = 2.0 meters
+
+export const BlockType = {
+  AIR: 0,
+  GRASS: 1,
+  DIRT: 2,
+  STONE: 3,
+  WATER: 4,
+  SAND: 5,
+  ROAD: 6,
+  SIDEWALK: 7,
+  BUILDING_BRICK: 8,
+  BUILDING_CONCRETE: 9,
+  BUILDING_GLASS: 10,
+  BUILDING_ROOF: 11,
+  WINDOW_LIT: 12,
+  WINDOW_DARK: 13,
+  TREE_TRUNK: 14,
+  TREE_LEAVES: 15,
+  SNOW: 16,
+  METAL: 17,
+  ROAD_MARKING: 18,
+};
+
+// RGB Colors in [0..1] range for vertex colors
+export const BlockPalette = {
+  [BlockType.AIR]: [0, 0, 0],
+  [BlockType.GRASS]: [0.28, 0.58, 0.22],
+  [BlockType.DIRT]: [0.45, 0.32, 0.18],
+  [BlockType.STONE]: [0.52, 0.54, 0.56],
+  [BlockType.WATER]: [0.18, 0.44, 0.72],
+  [BlockType.SAND]: [0.86, 0.78, 0.55],
+  [BlockType.ROAD]: [0.22, 0.23, 0.25],
+  [BlockType.ROAD_MARKING]: [0.92, 0.88, 0.45],
+  [BlockType.SIDEWALK]: [0.65, 0.67, 0.68],
+  [BlockType.BUILDING_BRICK]: [0.72, 0.38, 0.28],
+  [BlockType.BUILDING_CONCRETE]: [0.78, 0.79, 0.82],
+  [BlockType.BUILDING_GLASS]: [0.35, 0.65, 0.85],
+  [BlockType.BUILDING_ROOF]: [0.32, 0.33, 0.36],
+  [BlockType.WINDOW_LIT]: [1.0, 0.88, 0.45], // Glowing amber/warm light
+  [BlockType.WINDOW_DARK]: [0.15, 0.22, 0.28],
+  [BlockType.TREE_TRUNK]: [0.42, 0.26, 0.15],
+  [BlockType.TREE_LEAVES]: [0.18, 0.52, 0.16],
+  [BlockType.SNOW]: [0.95, 0.96, 0.98],
+  [BlockType.METAL]: [0.45, 0.48, 0.52],
+};
+
+// Return whether block is transparent/non-solid to neighbor face culling
+export function isBlockTransparent(type) {
+  return type === BlockType.AIR || type === BlockType.WATER;
+}

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pixel Planet - Бесконечный Воксельный Мир OSM</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- 3D Canvas Container -->
+  <div id="canvas-container"></div>
+
+  <!-- Central Crosshair -->
+  <div id="crosshair"></div>
+
+  <!-- HUD Interface Layer -->
+  <div id="hud-layer">
+    <!-- Top Bar: Search & Cities -->
+    <header id="top-bar" class="glass-panel hud-interactive">
+      <div class="brand">
+        <div class="brand-icon">■</div>
+        <span>PIXEL PLANET</span>
+      </div>
+
+      <!-- City / Landmark Search -->
+      <form id="search-form" class="search-container" onsubmit="return false;">
+        <input
+          id="search-input"
+          type="text"
+          class="search-input"
+          placeholder="Поиск города или места (напр. Рим, Берлин)..."
+          autocomplete="off"
+        />
+        <button id="search-btn" class="search-btn" type="submit">GO</button>
+      </form>
+
+      <!-- Preset Worldwide Landmarks -->
+      <div class="presets-container" id="presets-container">
+        <!-- Injected via JS -->
+      </div>
+    </header>
+
+    <!-- Middle HUD: Telemetry & Environment -->
+    <div id="middle-hud">
+      <!-- Left: GPS & Flight Telemetry -->
+      <div class="telemetry-card glass-panel hud-interactive">
+        <div class="title">
+          <span>GPS ТЕЛЕМЕТРИЯ</span>
+          <span id="loc-tag" class="stat-highlight">NEW YORK</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">КООРДИНАТЫ:</span>
+          <span id="stat-coords" class="stat-val">40.7484° N, -73.9857° W</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">ВЫСОТА (ALT):</span>
+          <span id="stat-alt" class="stat-val">120 m</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">КУРС (HEADING):</span>
+          <span id="stat-heading" class="stat-val">045° NE</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">ТЕКУЩИЙ ЧАНК:</span>
+          <span id="stat-chunk" class="stat-val">[0, 0]</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">АКТИВНО ЧАНКОВ:</span>
+          <span id="stat-chunks-count" class="stat-highlight">0</span>
+        </div>
+      </div>
+
+      <!-- Right: Environment & Controls -->
+      <div class="controls-card glass-panel hud-interactive">
+        <div style="font-size: 0.9rem; font-weight: 700; color: var(--accent-cyan); margin-bottom: 4px;">
+          ВРЕМЯ СУТОК
+        </div>
+        <div class="time-buttons">
+          <button class="time-btn active" data-time="day">ДЕНЬ</button>
+          <button class="time-btn" data-time="sunset">ЗАКАТ</button>
+          <button class="time-btn" data-time="night">НОЧЬ</button>
+        </div>
+
+        <div style="margin-top: 10px; font-size: 0.8rem; color: var(--text-dim);">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span>ДАЛЬНОСТЬ ОБЗОРА:</span>
+            <span id="render-dist-val" style="color: #fff; font-weight: 600;">6 чанков</span>
+          </div>
+          <input id="render-dist-slider" type="range" min="4" max="10" value="6" style="width: 100%; cursor: pointer;" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Bar: Speedometer & System Status -->
+    <footer id="bottom-bar">
+      <!-- Speedometer -->
+      <div class="speedometer-card glass-panel hud-interactive">
+        <div>
+          <div class="speed-value" id="speed-val">0</div>
+          <div class="speed-unit">KM / H [СКОРОСТЬ]</div>
+        </div>
+        <div class="speed-bar-container">
+          <div class="speed-bar-fill" id="speed-bar"></div>
+        </div>
+      </div>
+
+      <!-- Mode & Controls Hint -->
+      <div id="cursor-mode-badge" class="cursor-badge cursor-active glass-panel hud-interactive">
+        РЕЖИМ: КУРСОР [ЛКМ - ПОЛЕТ | ENTER или / - ПОИСК]
+      </div>
+
+      <!-- Right Column: Target Card Stacked Over Status Pill -->
+      <div class="bottom-right-stack hud-interactive">
+        <!-- Building Target Inspection Card -->
+        <div id="target-card" class="target-card glass-panel" style="display: none;">
+          <div class="target-header">
+            <div class="target-indicator-dot"></div>
+            <span class="target-badge">ОБЪЕКТ В ПРИЦЕЛЕ</span>
+            <span id="target-dist" class="target-dist">0 м</span>
+          </div>
+          <div id="target-name" class="target-title">Здание</div>
+          <div class="target-address-row">
+            <span class="target-icon">📍</span>
+            <span id="target-address" class="target-address">Адрес загружается...</span>
+          </div>
+          <div class="target-meta-row">
+            <span id="target-levels" class="target-meta-pill">3 этажа</span>
+            <span id="target-height" class="target-meta-pill">14 м</span>
+            <span id="target-type" class="target-meta-pill">Городское здание</span>
+          </div>
+        </div>
+
+        <!-- Status Pill -->
+        <div class="status-pill glass-panel">
+          <div class="status-dot" id="status-dot"></div>
+          <span id="status-text">Инициализация воксельного мира...</span>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Start Overlay & Controls Helper -->
+  <div id="instructions-overlay">
+    <div class="instructions-box">
+      <h1>PIXEL PLANET</h1>
+      <p>Процедурный воксельный мир Земли на данных OpenStreetMap</p>
+      
+      <div class="key-grid">
+        <div class="key-item">
+          <span class="key-badge">W A S D</span>
+          <span>Перемещение / Полет</span>
+        </div>
+        <div class="key-item">
+          <span class="key-badge">МЫШЬ</span>
+          <span>Свободный обзор</span>
+        </div>
+        <div class="key-item">
+          <span class="key-badge">SPACE</span>
+          <span>Набор высоты</span>
+        </div>
+        <div class="key-item">
+          <span class="key-badge">SHIFT / C</span>
+          <span>Снижение высоты</span>
+        </div>
+        <div class="key-item">
+          <span class="key-badge">E / CTRL</span>
+          <span>Сверхзвуковой форсаж</span>
+        </div>
+        <div class="key-item">
+          <span class="key-badge">СКРОЛЛ</span>
+          <span>Регулировка крейсерской скорости</span>
+        </div>
+      </div>
+
+      <button class="cta-button" id="start-btn">ПОЛЕТЕЛИ (CLICK TO FLY)</button>
+    </div>
+  </div>
+
+  <!-- Main Application Script -->
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
