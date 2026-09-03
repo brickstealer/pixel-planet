@@ -145,9 +145,11 @@ export class OsmDataProvider {
 
     while (this.requestQueue.length > 0) {
       const task = this.requestQueue.shift();
-      await this.fetchSectorByWorld(task.worldX, task.worldZ, task.radiusMeters, task.sectorKey);
-      // Polite interval between queries to protect from rate limits
-      await new Promise(resolve => setTimeout(resolve, 1200));
+      const res = await this.fetchSectorByWorld(task.worldX, task.worldZ, task.radiusMeters, task.sectorKey);
+      // If loaded from network, wait 1100ms. If loaded from local disk cache, instant 0ms!
+      if (!res || !res.fromCache) {
+        await new Promise(resolve => setTimeout(resolve, 1100));
+      }
     }
 
     this.isProcessingQueue = false;
@@ -199,6 +201,7 @@ export class OsmDataProvider {
     `.trim();
 
     let success = false;
+    let fromCache = false;
     const cacheKey = `osm_v2_${south.toFixed(4)}_${west.toFixed(4)}_${north.toFixed(4)}_${east.toFixed(4)}`;
 
     // 1. Check local IndexedDB disk cache
@@ -207,6 +210,7 @@ export class OsmDataProvider {
       this.processOsmData(cachedData);
       this.statusMessage = `OSM (Кэш): ${this.features.length} реальных зданий & объектов`;
       success = true;
+      fromCache = true;
     } else {
       // 2. Query network mirror if not in cache
       for (const mirror of this.overpassMirrors) {
@@ -244,6 +248,8 @@ export class OsmDataProvider {
     if (success && this.onFeaturesLoaded) {
       this.onFeaturesLoaded();
     }
+
+    return { success, fromCache };
   }
 
   /**
