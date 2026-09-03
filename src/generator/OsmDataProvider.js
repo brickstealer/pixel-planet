@@ -8,14 +8,14 @@ import {
 import { OsmCache } from '../utils/OsmCache.js';
 
 export const FAMOUS_CITIES = [
-  { name: 'Manhattan, New York', lat: 40.7484, lon: -73.9857, zoomDesc: 'Empire State & Midtown Skyscrapers', groundY: 20 },
-  { name: 'Paris (Eiffel Tower)', lat: 48.8584, lon: 2.2945, zoomDesc: 'Champ de Mars & Haussmann Quarters', groundY: 20 },
-  { name: 'Tokyo (Shibuya)', lat: 35.6595, lon: 139.7004, zoomDesc: 'Shibuya Crossing & Neon Towers', groundY: 20 },
-  { name: 'Moscow (Red Square)', lat: 55.7539, lon: 37.6208, zoomDesc: 'Kremlin Towers & Historic Center', groundY: 20 },
-  { name: 'London (Westminster)', lat: 51.5007, lon: -0.1246, zoomDesc: 'Big Ben, River Thames & Bridges', groundY: 20 },
-  { name: 'Dubai (Burj Khalifa)', lat: 25.1972, lon: 55.2744, zoomDesc: 'Downtown Mega Skyscrapers', groundY: 18 },
-  { name: 'Rome (Colosseum)', lat: 41.8902, lon: 12.4922, zoomDesc: 'Colosseum & Roman Forum Ruins', groundY: 20 },
-  { name: 'San Francisco (Downtown)', lat: 37.7891, lon: -122.4014, zoomDesc: 'Financial District & Bay Coast', groundY: 22 },
+  { name: 'Манхэттен', subtitle: 'Нью-Йорк, США', lat: 40.7484, lon: -73.9857, zoomDesc: 'Empire State & Midtown Skyscrapers', groundY: 20 },
+  { name: 'Париж', subtitle: 'Франция • Эйфелева башня', lat: 48.8584, lon: 2.2945, zoomDesc: 'Champ de Mars & Haussmann Quarters', groundY: 20 },
+  { name: 'Токио', subtitle: 'Япония • Сибуя', lat: 35.6595, lon: 139.7004, zoomDesc: 'Shibuya Crossing & Neon Towers', groundY: 20 },
+  { name: 'Москва', subtitle: 'Россия • Красная площадь', lat: 55.7539, lon: 37.6208, zoomDesc: 'Кремлевские башни и исторический центр', groundY: 20 },
+  { name: 'Лондон', subtitle: 'Великобритания • Вестминстер', lat: 51.5007, lon: -0.1246, zoomDesc: 'Big Ben, River Thames & Bridges', groundY: 20 },
+  { name: 'Дубай', subtitle: 'ОАЭ • Бурдж-Халифа', lat: 25.1972, lon: 55.2744, zoomDesc: 'Downtown Mega Skyscrapers', groundY: 18 },
+  { name: 'Рим', subtitle: 'Италия • Колизей', lat: 41.8902, lon: 12.4922, zoomDesc: 'Colosseum & Roman Forum Ruins', groundY: 20 },
+  { name: 'Сан-Франциско', subtitle: 'США • Финансовый район', lat: 37.7891, lon: -122.4014, zoomDesc: 'Financial District & Bay Coast', groundY: 22 },
 ];
 
 export class OsmDataProvider {
@@ -53,12 +53,12 @@ export class OsmDataProvider {
   }
 
   /**
-   * Search city or landmark using Nominatim Geocoding
+   * Search city or landmark using Nominatim Geocoding with detailed address breakdown
    */
   async searchLocation(query) {
     try {
       this.statusMessage = `Поиск "${query}"...`;
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`;
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=8&addressdetails=1`;
       const res = await fetch(url, {
         headers: { 'Accept-Language': 'ru,en' }
       });
@@ -68,11 +68,25 @@ export class OsmDataProvider {
         this.statusMessage = 'Место не найдено';
         return null;
       }
-      return data.map(item => ({
-        name: item.display_name,
-        lat: parseFloat(item.lat),
-        lon: parseFloat(item.lon)
-      }));
+      return data.map(item => {
+        const addr = item.address || {};
+        const title = addr.road || addr.suburb || item.name || item.display_name.split(',')[0].trim();
+        const cityName = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
+        const region = addr.state || '';
+        const country = addr.country || '';
+
+        const subtitleParts = [cityName, region, country].filter(p => p && p !== title);
+        const subtitle = subtitleParts.join(', ') || item.display_name;
+
+        return {
+          title: title,
+          subtitle: subtitle,
+          fullName: item.display_name,
+          city: cityName || region || country,
+          lat: parseFloat(item.lat),
+          lon: parseFloat(item.lon)
+        };
+      });
     } catch (err) {
       console.warn('Nominatim error:', err);
       this.statusMessage = 'Ошибка поиска';

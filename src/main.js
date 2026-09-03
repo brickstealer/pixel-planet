@@ -140,8 +140,17 @@ FAMOUS_CITIES.forEach((city, index) => {
 
 async function teleportToCity(city) {
   currentCity = city;
-  document.getElementById('loc-tag').textContent = city.name.toUpperCase().split(',')[0];
-  updateStatus(`Загрузка локации: ${city.name}...`);
+  const title = city.title || city.name.split(',')[0].trim();
+  const subtitle = city.subtitle || city.zoomDesc || '';
+
+  document.getElementById('loc-tag').textContent = title.toUpperCase();
+  const subtitleEl = document.getElementById('loc-subtitle');
+  if (subtitleEl) {
+    subtitleEl.textContent = subtitle;
+    subtitleEl.title = subtitle;
+  }
+
+  updateStatus(`Локация: ${title} (${subtitle})...`);
 
   // Reset camera to spawn position above city center
   camera.position.set(0, 85, 0);
@@ -159,45 +168,126 @@ async function teleportToCity(city) {
   savePlayerState();
 }
 
-// Search Bar Handling (Nominatim Geocoding)
+// Search Bar Handling (Nominatim Geocoding with Live Autocomplete)
 const searchForm = document.getElementById('search-form');
 const searchInput = document.getElementById('search-input');
+const searchDropdown = document.getElementById('search-dropdown');
+let searchDebounceTimer = null;
+let currentSearchResults = [];
+
+function hideSearchDropdown() {
+  if (searchDropdown) {
+    searchDropdown.style.display = 'none';
+    searchDropdown.innerHTML = '';
+  }
+}
+
+function showSearchResults(results) {
+  currentSearchResults = results;
+  if (!searchDropdown || !results || results.length === 0) {
+    hideSearchDropdown();
+    return;
+  }
+
+  searchDropdown.innerHTML = results.map((item, idx) => `
+    <div class="search-dropdown-item" data-idx="${idx}">
+      <div class="search-dropdown-title">
+        <span>📍</span>
+        <span>${item.title}</span>
+      </div>
+      <div class="search-dropdown-subtitle">${item.subtitle}</div>
+    </div>
+  `).join('');
+
+  searchDropdown.style.display = 'flex';
+
+  searchDropdown.querySelectorAll('.search-dropdown-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = parseInt(el.dataset.idx, 10);
+      selectSearchResult(results[idx]);
+    });
+  });
+}
+
+async function selectSearchResult(target) {
+  hideSearchDropdown();
+  searchInput.value = target.title;
+  searchInput.blur();
+
+  const customCity = {
+    name: target.title,
+    title: target.title,
+    subtitle: target.subtitle,
+    lat: target.lat,
+    lon: target.lon,
+    zoomDesc: target.subtitle
+  };
+
+  // Remove active state from preset chips
+  document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
+  await teleportToCity(customCity);
+
+  setTimeout(() => {
+    renderer.domElement.requestPointerLock();
+  }, 350);
+}
 
 // Clicking on search input ensures pointer lock is released
 searchInput.addEventListener('focus', () => {
   if (document.pointerLockElement) {
     document.exitPointerLock();
   }
+  if (currentSearchResults.length > 0) {
+    searchDropdown.style.display = 'flex';
+  }
 });
 
+// Live typing suggestions with debounce
+searchInput.addEventListener('input', (e) => {
+  const query = e.target.value.trim();
+  clearTimeout(searchDebounceTimer);
+
+  if (query.length < 2) {
+    hideSearchDropdown();
+    return;
+  }
+
+  searchDebounceTimer = setTimeout(async () => {
+    const results = await osmProvider.searchLocation(query);
+    if (results && results.length > 0) {
+      showSearchResults(results);
+    } else {
+      hideSearchDropdown();
+    }
+  }, 300);
+});
+
+// Close dropdown on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-wrapper')) {
+    hideSearchDropdown();
+  }
+});
+
+// Form submission on Enter
 searchForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const query = searchInput.value.trim();
   if (!query) return;
 
-  searchInput.blur();
+  clearTimeout(searchDebounceTimer);
   updateStatus(`Поиск "${query}" на планете...`);
+
+  if (currentSearchResults.length > 0) {
+    selectSearchResult(currentSearchResults[0]);
+    return;
+  }
+
   const results = await osmProvider.searchLocation(query);
-
   if (results && results.length > 0) {
-    const target = results[0];
-    const customCity = {
-      name: target.name.split(',')[0],
-      lat: target.lat,
-      lon: target.lon,
-      zoomDesc: target.name
-    };
-
-    // Remove active state from chips
-    document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
-    await teleportToCity(customCity);
-
-    // Auto resume flight
-    setTimeout(() => {
-      renderer.domElement.requestPointerLock();
-    }, 400);
+    selectSearchResult(results[0]);
   } else {
-    updateStatus('Город не найден. Попробуйте другое название.');
+    updateStatus('Место не найдено. Уточните город (напр: "ул. Пушкина, Казань")');
   }
 });
 
@@ -510,8 +600,13 @@ async function bootApp() {
       const saved = JSON.parse(savedStateRaw);
       if (saved && saved.city && saved.pos) {
         currentCity = saved.city;
-        document.getElementById('loc-tag').textContent = saved.city.name.toUpperCase().split(',')[0];
-        updateStatus(`Восстановление позиции: ${saved.city.name}...`);
+        const title = saved.city.title || saved.city.name.split(',')[0].trim();
+        const subtitle = saved.city.subtitle || saved.city.zoomDesc || '';
+        document.getElementById('loc-tag').textContent = title.toUpperCase();
+        const subtitleEl = document.getElementById('loc-subtitle');
+        if (subtitleEl) subtitleEl.textContent = subtitle;
+
+        updateStatus(`Восстановление позиции: ${title} (${subtitle})...`);
 
         // Restore camera position & view angles
         camera.position.set(saved.pos.x, saved.pos.y, saved.pos.z);

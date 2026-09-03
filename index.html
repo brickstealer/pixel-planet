@@ -23,16 +23,20 @@
       </div>
 
       <!-- City / Landmark Search -->
-      <form id="search-form" class="search-container" onsubmit="return false;">
-        <input
-          id="search-input"
-          type="text"
-          class="search-input"
-          placeholder="Поиск города или места (напр. Рим, Берлин)..."
-          autocomplete="off"
-        />
-        <button id="search-btn" class="search-btn" type="submit">GO</button>
-      </form>
+      <div class="search-wrapper">
+        <form id="search-form" class="search-container" onsubmit="return false;">
+          <input
+            id="search-input"
+            type="text"
+            class="search-input"
+            placeholder="Поиск города или улицы (напр. ул. Пушкина)..."
+            autocomplete="off"
+          />
+          <button id="search-btn" class="search-btn" type="submit">GO</button>
+        </form>
+        <!-- Search Suggestions / Results Dropdown -->
+        <div id="search-dropdown" class="search-dropdown" style="display: none;"></div>
+      </div>
 
       <!-- Preset Worldwide Landmarks -->
       <div class="presets-container" id="presets-container">
@@ -48,6 +52,7 @@
           <span>GPS ТЕЛЕМЕТРИЯ</span>
           <span id="loc-tag" class="stat-highlight">NEW YORK</span>
         </div>
+        <div id="loc-subtitle" class="loc-subtitle">Манхэттен, Нью-Йорк, США</div>
         <div class="stat-row">
           <span class="stat-label">КООРДИНАТЫ:</span>
           <span id="stat-coords" class="stat-val">40.7484° N, -73.9857° W</span>
