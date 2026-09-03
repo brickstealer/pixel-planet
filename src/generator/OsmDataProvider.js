@@ -166,14 +166,22 @@ export class OsmDataProvider {
     const west = targetLon - deltaLon;
     const east = targetLon + deltaLon;
 
-    // Fast Overpass query using "out geom;"
+    // Comprehensive Overpass query: buildings, relations, parts, highways, water, parks, parking
     const query = `
-      [out:json][timeout:12];
+      [out:json][timeout:15];
       (
         way["building"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        relation["building"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        way["building:part"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        relation["building:part"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         way["highway"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         way["waterway"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        way["natural"="water"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        relation["natural"="water"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         way["leisure"="park"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        relation["leisure"="park"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        way["landuse"="grass"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        way["amenity"="parking"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
       );
       out geom;
     `.trim();
@@ -194,7 +202,7 @@ export class OsmDataProvider {
         if (res.ok) {
           const data = await res.json();
           this.processOsmData(data);
-          this.statusMessage = `OSM Онлайн: ${this.features.length} реальных зданий & дорог`;
+          this.statusMessage = `OSM Онлайн: ${this.features.length} реальных зданий & объектов`;
           success = true;
           break;
         }
@@ -215,124 +223,151 @@ export class OsmDataProvider {
   }
 
   /**
-   * Process raw Overpass data with geom arrays directly into metric world points
+   * Process raw Overpass data with geom arrays (both ways & relation multipolygons)
    */
   processOsmData(osmData) {
     if (!osmData || !osmData.elements) return;
 
     for (const elem of osmData.elements) {
-      if (elem.type !== 'way' || !elem.geometry || elem.geometry.length < 2) continue;
-
       const tags = elem.tags || {};
-      const pts = [];
 
-      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-
-      for (const pt of elem.geometry) {
-        // Metric position relative to global anchor
-        const mx = (pt.lon - this.anchorLon) * (111320 * Math.cos(this.anchorLat * Math.PI / 180));
-        const mz = -(pt.lat - this.anchorLat) * 110540;
-
-        pts.push([mx, mz]);
-
-        if (mx < minX) minX = mx;
-        if (mx > maxX) maxX = mx;
-        if (mz < minZ) minZ = mz;
-        if (mz > maxZ) maxZ = mz;
+      // Gather outer geometry rings for both ways and relation multipolygons
+      const geometryList = [];
+      if (elem.type === 'way' && elem.geometry && elem.geometry.length >= 2) {
+        geometryList.push(elem.geometry);
+      } else if (elem.type === 'relation' && elem.members) {
+        for (const m of elem.members) {
+          if (m.role === 'outer' && m.geometry && m.geometry.length >= 2) {
+            geometryList.push(m.geometry);
+          }
+        }
       }
 
-      if (tags.building) {
-        // Real Height in meters
-        let heightMeters = 14;
-        let levels = 3;
-        if (tags.height) {
-          const parsed = parseFloat(tags.height);
-          if (!isNaN(parsed) && parsed > 0) heightMeters = parsed;
+      if (geometryList.length === 0) continue;
+
+      for (const geom of geometryList) {
+        const pts = [];
+        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+
+        for (const pt of geom) {
+          const mx = (pt.lon - this.anchorLon) * (111320 * Math.cos(this.anchorLat * Math.PI / 180));
+          const mz = -(pt.lat - this.anchorLat) * 110540;
+          pts.push([mx, mz]);
+          if (mx < minX) minX = mx;
+          if (mx > maxX) maxX = mx;
+          if (mz < minZ) minZ = mz;
+          if (mz > maxZ) maxZ = mz;
         }
-        if (tags['building:levels']) {
-          const parsedL = parseFloat(tags['building:levels']);
-          if (!isNaN(parsedL) && parsedL > 0) {
-            levels = Math.round(parsedL);
-            if (!tags.height) heightMeters = levels * 3.6;
+
+        // Deduplicate closing point
+        if (pts.length > 3 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) {
+          pts.pop();
+        }
+
+        if (tags.building || tags['building:part']) {
+          // Real Height in meters
+          let heightMeters = 14;
+          let levels = 3;
+          if (tags.height) {
+            const parsed = parseFloat(tags.height);
+            if (!isNaN(parsed) && parsed > 0) heightMeters = parsed;
           }
-        } else {
-          levels = Math.max(1, Math.round(heightMeters / 3.6));
+          if (tags['building:levels']) {
+            const parsedL = parseFloat(tags['building:levels']);
+            if (!isNaN(parsedL) && parsedL > 0) {
+              levels = Math.round(parsedL);
+              if (!tags.height) heightMeters = levels * 3.6;
+            }
+          } else {
+            levels = Math.max(1, Math.round(heightMeters / 3.6));
+          }
+
+          // Parse Address
+          const street = tags['addr:street'] || tags['addr:street:ru'] || tags['addr:street:en'] || null;
+          const houseNumber = tags['addr:housenumber'] || null;
+          const city = tags['addr:city'] || null;
+          let fullAddress = null;
+          if (street && houseNumber) fullAddress = `${street}, ${houseNumber}`;
+          else if (street) fullAddress = street;
+          else if (houseNumber) fullAddress = `д. ${houseNumber}`;
+
+          // Material Palette based on real OSM tags
+          let blockType = BlockType.BUILDING_CONCRETE;
+          const mat = (tags['building:material'] || '').toLowerCase();
+          if (mat.includes('brick') || tags.building === 'house') {
+            blockType = BlockType.BUILDING_BRICK;
+          } else if (mat.includes('glass') || heightMeters > 38) {
+            blockType = BlockType.BUILDING_GLASS;
+          } else if (mat.includes('stone')) {
+            blockType = BlockType.STONE;
+          }
+
+          const feature = {
+            id: elem.id,
+            name: tags['name:ru'] || tags.name || tags['name:en'] || null,
+            address: fullAddress,
+            city: city,
+            levels: levels,
+            height: Math.round(heightMeters),
+            buildingType: tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание'),
+            amenity: tags.amenity || tags.shop || tags.tourism || null,
+            type: 'building',
+            points: pts,
+            blockType: blockType,
+            bounds: [minX, minZ, maxX, maxZ]
+          };
+
+          this.addFeatureToSpatialBuckets(feature);
+          this.features.push(feature);
+
+        } else if (tags.highway) {
+          let width = 4;
+          if (tags.highway === 'primary' || tags.highway === 'motorway' || tags.highway === 'trunk') width = 8;
+          else if (tags.highway === 'secondary' || tags.highway === 'tertiary') width = 6;
+          else if (tags.highway === 'pedestrian' || tags.highway === 'footway' || tags.highway === 'path') width = 3;
+
+          const feature = {
+            id: elem.id,
+            name: tags['name:ru'] || tags.name || tags['name:en'] || null,
+            type: 'road',
+            points: pts,
+            width: width,
+            bounds: [minX, minZ, maxX, maxZ]
+          };
+
+          this.addFeatureToSpatialBuckets(feature);
+          this.features.push(feature);
+
+        } else if (tags.waterway || tags.natural === 'water') {
+          const feature = {
+            id: elem.id,
+            type: 'water',
+            points: pts,
+            bounds: [minX, minZ, maxX, maxZ]
+          };
+          this.addFeatureToSpatialBuckets(feature);
+          this.features.push(feature);
+
+        } else if (tags.leisure === 'park' || tags.leisure === 'garden' || tags.landuse === 'grass') {
+          const feature = {
+            id: elem.id,
+            type: 'park',
+            points: pts,
+            bounds: [minX, minZ, maxX, maxZ]
+          };
+          this.addFeatureToSpatialBuckets(feature);
+          this.features.push(feature);
+
+        } else if (tags.amenity === 'parking') {
+          const feature = {
+            id: elem.id,
+            type: 'parking',
+            points: pts,
+            bounds: [minX, minZ, maxX, maxZ]
+          };
+          this.addFeatureToSpatialBuckets(feature);
+          this.features.push(feature);
         }
-
-        // Parse Address
-        const street = tags['addr:street'] || tags['addr:street:ru'] || tags['addr:street:en'] || null;
-        const houseNumber = tags['addr:housenumber'] || null;
-        const city = tags['addr:city'] || null;
-        let fullAddress = null;
-        if (street && houseNumber) fullAddress = `${street}, ${houseNumber}`;
-        else if (street) fullAddress = street;
-        else if (houseNumber) fullAddress = `д. ${houseNumber}`;
-
-        // Material Palette based on real OSM tags
-        let blockType = BlockType.BUILDING_CONCRETE;
-        const mat = (tags['building:material'] || '').toLowerCase();
-        if (mat.includes('brick') || tags.building === 'house') {
-          blockType = BlockType.BUILDING_BRICK;
-        } else if (mat.includes('glass') || heightMeters > 40) {
-          blockType = BlockType.BUILDING_GLASS;
-        } else if (mat.includes('stone')) {
-          blockType = BlockType.STONE;
-        }
-
-        const feature = {
-          id: elem.id,
-          name: tags['name:ru'] || tags.name || tags['name:en'] || null,
-          address: fullAddress,
-          city: city,
-          levels: levels,
-          height: Math.round(heightMeters),
-          buildingType: tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание'),
-          amenity: tags.amenity || tags.shop || tags.tourism || null,
-          type: 'building',
-          points: pts,
-          blockType: blockType,
-          bounds: [minX, minZ, maxX, maxZ]
-        };
-
-        this.addFeatureToSpatialBuckets(feature);
-        this.features.push(feature);
-
-      } else if (tags.highway) {
-        let width = 4;
-        if (tags.highway === 'primary' || tags.highway === 'motorway' || tags.highway === 'trunk') width = 8;
-        else if (tags.highway === 'secondary' || tags.highway === 'tertiary') width = 6;
-
-        const feature = {
-          id: elem.id,
-          name: tags['name:ru'] || tags.name || tags['name:en'] || null,
-          type: 'road',
-          points: pts,
-          width: width,
-          bounds: [minX, minZ, maxX, maxZ]
-        };
-
-        this.addFeatureToSpatialBuckets(feature);
-        this.features.push(feature);
-
-      } else if (tags.waterway || tags.natural === 'water') {
-        const feature = {
-          id: elem.id,
-          type: 'water',
-          points: pts,
-          bounds: [minX, minZ, maxX, maxZ]
-        };
-        this.addFeatureToSpatialBuckets(feature);
-        this.features.push(feature);
-
-      } else if (tags.leisure === 'park') {
-        const feature = {
-          id: elem.id,
-          type: 'park',
-          points: pts,
-          bounds: [minX, minZ, maxX, maxZ]
-        };
-        this.addFeatureToSpatialBuckets(feature);
-        this.features.push(feature);
       }
     }
   }
@@ -385,6 +420,13 @@ export class OsmDataProvider {
     return Array.from(candidates);
   }
 
+  isPointInLoadedSector(worldX, worldZ) {
+    const SECTOR_SIZE = 600;
+    const sx = Math.floor(worldX / SECTOR_SIZE);
+    const sz = Math.floor(worldZ / SECTOR_SIZE);
+    return this.fetchedSectors.has(`${sx},${sz}`);
+  }
+
   /**
    * Populates a voxel chunk using spatial OSM features
    */
@@ -394,8 +436,12 @@ export class OsmDataProvider {
     const startZ = chunkZ * CHUNK_SIZE_Z * VOXEL_SIZE;
     const endZ = startZ + CHUNK_SIZE_Z * VOXEL_SIZE;
 
+    const midX = (startX + endX) / 2;
+    const midZ = (startZ + endZ) / 2;
+    const isSectorActive = this.isPointInLoadedSector(midX, midZ);
+
     const nearbyFeatures = this.getFeaturesInBounds(startX, startZ, endX, endZ);
-    if (nearbyFeatures.length === 0) return false;
+    if (!isSectorActive && nearbyFeatures.length === 0) return false;
 
     let hasFeatures = false;
 
@@ -414,7 +460,7 @@ export class OsmDataProvider {
       }
     }
 
-    // 2. Rasterize Roads, Parks & Water
+    // 2. Rasterize Roads, Parks, Parking & Water
     for (const feat of nearbyFeatures) {
       if (feat.type === 'road') {
         for (let i = 0; i < feat.points.length - 1; i++) {
@@ -464,6 +510,30 @@ export class OsmDataProvider {
             }
           }
         }
+      } else if (feat.type === 'parking') {
+        for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+          const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+            const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+            if (this.pointInPolygon(worldVX, worldVZ, feat.points)) {
+              hasFeatures = true;
+              setBlock(lx, groundY, lz, BlockType.ROAD);
+            }
+          }
+        }
+      } else if (feat.type === 'water') {
+        for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+          const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+            const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+            if (this.pointInPolygon(worldVX, worldVZ, feat.points)) {
+              hasFeatures = true;
+              for (let wy = groundY - 3; wy <= groundY; wy++) {
+                setBlock(lx, wy, lz, BlockType.WATER);
+              }
+            }
+          }
+        }
       }
     }
 
@@ -476,17 +546,24 @@ export class OsmDataProvider {
 
       hasFeatures = true;
       const bHeightVoxels = Math.min(CHUNK_SIZE_Y - groundY - 2, Math.max(3, Math.floor(feat.height / VOXEL_SIZE)));
+      const bCenterX = (minBX + maxBX) / 2;
+      const bCenterZ = (minBZ + maxBZ) / 2;
+      const isSmall = (maxBX - minBX < 6 || maxBZ - minBZ < 6);
 
       for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
         const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
-        if (worldVX < minBX || worldVX > maxBX) continue;
+        if (worldVX < minBX - VOXEL_SIZE || worldVX > maxBX + VOXEL_SIZE) continue;
 
         for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
           const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
-          if (worldVZ < minBZ || worldVZ > maxBZ) continue;
+          if (worldVZ < minBZ - VOXEL_SIZE || worldVZ > maxBZ + VOXEL_SIZE) continue;
 
-          if (this.pointInPolygon(worldVX, worldVZ, feat.points)) {
-            const isPerimeter = this.isPerimeterVoxel(worldVX, worldVZ, feat.points, VOXEL_SIZE);
+          // Check polygon or small building center fallback
+          const isInside = this.pointInPolygon(worldVX, worldVZ, feat.points) ||
+            (isSmall && Math.abs(worldVX - bCenterX) <= VOXEL_SIZE && Math.abs(worldVZ - bCenterZ) <= VOXEL_SIZE);
+
+          if (isInside) {
+            const isPerimeter = isSmall ? true : this.isPerimeterVoxel(worldVX, worldVZ, feat.points, VOXEL_SIZE);
 
             for (let by = groundY; by <= groundY + bHeightVoxels; by++) {
               if (by === groundY + bHeightVoxels) {
@@ -512,7 +589,7 @@ export class OsmDataProvider {
       }
     }
 
-    return hasFeatures;
+    return isSectorActive || hasFeatures;
   }
 
   pointInPolygon(x, z, poly) {
