@@ -5,6 +5,7 @@ import {
   VOXEL_SIZE,
   BlockType
 } from '../core/VoxelTypes.js';
+import { OsmCache } from '../utils/OsmCache.js';
 
 export const FAMOUS_CITIES = [
   { name: 'Manhattan, New York', lat: 40.7484, lon: -73.9857, zoomDesc: 'Empire State & Midtown Skyscrapers', groundY: 20 },
@@ -39,6 +40,7 @@ export class OsmDataProvider {
     this.queuedSectors = new Set();
     this.lastCheckPos = { x: 0, z: 0 };
     this.subwayStations = []; // registry of stations for entrance name resolution
+    this.cache = new OsmCache();
 
     this.overpassMirrors = [
       'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
@@ -197,27 +199,39 @@ export class OsmDataProvider {
     `.trim();
 
     let success = false;
+    const cacheKey = `osm_v2_${south.toFixed(4)}_${west.toFixed(4)}_${north.toFixed(4)}_${east.toFixed(4)}`;
 
-    for (const mirror of this.overpassMirrors) {
-      try {
-        const res = await fetch(mirror, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'PixelPlanet3D/1.0 (tester@pixelplanet.local)'
-          },
-          body: 'data=' + encodeURIComponent(query)
-        });
+    // 1. Check local IndexedDB disk cache
+    const cachedData = await this.cache.get(cacheKey);
+    if (cachedData) {
+      this.processOsmData(cachedData);
+      this.statusMessage = `OSM (Кэш): ${this.features.length} реальных зданий & объектов`;
+      success = true;
+    } else {
+      // 2. Query network mirror if not in cache
+      for (const mirror of this.overpassMirrors) {
+        try {
+          const res = await fetch(mirror, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'User-Agent': 'PixelPlanet3D/1.0 (tester@pixelplanet.local)'
+            },
+            body: 'data=' + encodeURIComponent(query)
+          });
 
-        if (res.ok) {
-          const data = await res.json();
-          this.processOsmData(data);
-          this.statusMessage = `OSM Онлайн: ${this.features.length} реальных зданий & объектов`;
-          success = true;
-          break;
+          if (res.ok) {
+            const data = await res.json();
+            this.processOsmData(data);
+            this.statusMessage = `OSM Онлайн: ${this.features.length} реальных зданий & объектов`;
+            // Save response in IndexedDB
+            await this.cache.set(cacheKey, data);
+            success = true;
+            break;
+          }
+        } catch (err) {
+          // try next mirror
         }
-      } catch (err) {
-        // try next mirror
       }
     }
 

@@ -156,6 +156,7 @@ async function teleportToCity(city) {
 
   // Trigger initial chunk generation around new position
   chunkManager.update(camera.position, controls.getLookDirection());
+  savePlayerState();
 }
 
 // Search Bar Handling (Nominatim Geocoding)
@@ -366,6 +367,13 @@ function animate() {
   // Update Crosshair Target Inspection
   updateBuildingInspection(delta);
 
+  // Auto-save player state every 1.5 seconds
+  saveTimer += delta;
+  if (saveTimer > 1.5) {
+    saveTimer = 0;
+    savePlayerState();
+  }
+
   // Render scene
   renderer.render(scene, camera);
 }
@@ -458,6 +466,91 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Boot up initial city
-teleportToCity(FAMOUS_CITIES[0]);
-animate();
+// --- 11. State Persistence (Save & Restore Player Position) ---
+let saveTimer = 0;
+
+function savePlayerState() {
+  if (!currentCity) return;
+  const state = {
+    city: currentCity,
+    pos: {
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z
+    },
+    rot: {
+      yaw: controls.yaw,
+      pitch: controls.pitch
+    },
+    time: currentTimeMode,
+    renderDist: chunkManager.renderDistance
+  };
+  try {
+    localStorage.setItem('pixel_planet_saved_state', JSON.stringify(state));
+  } catch (err) {
+    // Ignore quota errors
+  }
+}
+
+window.addEventListener('beforeunload', savePlayerState);
+
+async function bootApp() {
+  let restored = false;
+  const savedStateRaw = localStorage.getItem('pixel_planet_saved_state');
+
+  if (savedStateRaw) {
+    try {
+      const saved = JSON.parse(savedStateRaw);
+      if (saved && saved.city && saved.pos) {
+        currentCity = saved.city;
+        document.getElementById('loc-tag').textContent = saved.city.name.toUpperCase().split(',')[0];
+        updateStatus(`Восстановление позиции: ${saved.city.name}...`);
+
+        // Restore camera position & view angles
+        camera.position.set(saved.pos.x, saved.pos.y, saved.pos.z);
+        if (saved.rot) {
+          controls.setLookAngles(saved.rot.yaw, saved.rot.pitch);
+        }
+        controls.resetVelocity();
+
+        // Restore time mode
+        if (saved.time) {
+          setTimeOfDay(saved.time);
+        }
+
+        // Restore render distance
+        if (saved.renderDist) {
+          chunkManager.renderDistance = saved.renderDist;
+          if (renderSlider) renderSlider.value = saved.renderDist;
+          if (renderLabel) renderLabel.textContent = `${saved.renderDist} чанков`;
+        }
+
+        // Match active preset chip
+        document.querySelectorAll('.preset-chip').forEach(c => {
+          c.classList.toggle('active', c.textContent.trim().toLowerCase() === saved.city.name.split(',')[0].trim().toLowerCase());
+        });
+
+        // Initialize OSM anchor around saved city
+        chunkManager.clearAll();
+        await osmProvider.setAnchor(saved.city.lat, saved.city.lon, 900);
+        updateStatus(osmProvider.statusMessage);
+
+        // Stream chunks at player's exact saved position
+        osmProvider.checkStreaming(camera.position.x, camera.position.z);
+        chunkManager.update(camera.position, controls.getLookDirection());
+
+        restored = true;
+      }
+    } catch (err) {
+      console.warn('Failed to restore saved player state:', err);
+    }
+  }
+
+  if (!restored) {
+    await teleportToCity(FAMOUS_CITIES[0]);
+  }
+
+  animate();
+}
+
+bootApp();

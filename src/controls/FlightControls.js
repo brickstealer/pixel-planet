@@ -195,4 +195,15 @@ export class FlightControls {
     this.camera.getWorldDirection(dir);
     return dir;
   }
+
+  setLookAngles(yaw, pitch) {
+    this.yaw = yaw;
+    this.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, pitch));
+    const euler = new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ');
+    this.camera.quaternion.setFromEuler(euler);
+  }
+
+  resetVelocity() {
+    this.velocity.set(0, 0, 0);
+  }
 }
