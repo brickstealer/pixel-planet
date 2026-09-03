@@ -38,12 +38,15 @@ export class OsmDataProvider {
     this.requestQueue = [];
     this.isProcessingQueue = false;
     this.queuedSectors = new Set();
+    this.failedSectors = new Map(); // sectorKey -> retry timestamp
     this.lastCheckPos = { x: 0, z: 0 };
+    this.playerPos = { x: 0, z: 0 };
     this.subwayStations = []; // registry of stations for entrance name resolution
     this.cache = new OsmCache();
 
     this.overpassMirrors = [
       'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
       'https://overpass.private.coffee/api/interpreter',
       'https://overpass-api.de/api/interpreter'
     ];
@@ -88,6 +91,11 @@ export class OsmDataProvider {
     this.subwayStations = [];
     this.fetchedSectors.clear();
     this.activeFetches.clear();
+    this.queuedSectors.clear();
+    this.failedSectors.clear();
+    this.requestQueue = [];
+    this.isProcessingQueue = false;
+    this.lastCheckPos = { x: 0, z: 0 };
 
     this.isLoading = true;
     this.statusMessage = `Загрузка OSM для [${lat.toFixed(3)}, ${lon.toFixed(3)}]...`;
@@ -98,43 +106,76 @@ export class OsmDataProvider {
   }
 
   /**
-   * Continually checks and streams OSM sectors as player flies (debounced every 100m)
+   * Continually checks and streams OSM sectors as player flies, prioritizing closest sectors
    */
   checkStreaming(playerWorldX, playerWorldZ) {
-    const distSinceCheck = Math.hypot(playerWorldX - this.lastCheckPos.x, playerWorldZ - this.lastCheckPos.z);
-    if (distSinceCheck < 100 && this.fetchedSectors.size > 0) return;
-    this.lastCheckPos = { x: playerWorldX, z: playerWorldZ };
+    this.playerPos = { x: playerWorldX, z: playerWorldZ };
 
     const SECTOR_SIZE = 600;
     const currentSectorX = Math.floor(playerWorldX / SECTOR_SIZE);
     const currentSectorZ = Math.floor(playerWorldZ / SECTOR_SIZE);
+    const currentKey = `${currentSectorX},${currentSectorZ}`;
 
-    // Prioritize current sector, then immediate neighbors
+    const distSinceCheck = Math.hypot(playerWorldX - this.lastCheckPos.x, playerWorldZ - this.lastCheckPos.z);
+    const currentSectorMissing = !this.fetchedSectors.has(currentKey);
+
+    // If player hasn't moved much and the current sector is already loaded, skip
+    if (distSinceCheck < 75 && this.fetchedSectors.size > 0 && !currentSectorMissing) {
+      return;
+    }
+    this.lastCheckPos = { x: playerWorldX, z: playerWorldZ };
+
+    // Prune distant tasks (> 1400m) to keep the pipeline fresh and unclogged
+    this.requestQueue = this.requestQueue.filter(task => {
+      const d = Math.hypot(task.worldX - playerWorldX, task.worldZ - playerWorldZ);
+      if (d > 1400) {
+        this.queuedSectors.delete(task.sectorKey);
+        return false;
+      }
+      return true;
+    });
+
     const sectors = [];
+    const now = Date.now();
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
         const sx = currentSectorX + dx;
         const sz = currentSectorZ + dz;
         const key = `${sx},${sz}`;
-        const dist = Math.hypot(dx, dz);
-        sectors.push({ sx, sz, key, dist });
+
+        // If sector failed recently, wait until cooldown expires
+        if (this.failedSectors.has(key) && now < this.failedSectors.get(key)) {
+          continue;
+        }
+
+        const centerX = (sx + 0.5) * SECTOR_SIZE;
+        const centerZ = (sz + 0.5) * SECTOR_SIZE;
+        const dist = Math.hypot(centerX - playerWorldX, centerZ - playerWorldZ);
+        sectors.push({ sx, sz, key, centerX, centerZ, dist });
       }
     }
+
+    // Always sort so closest sector comes first
     sectors.sort((a, b) => a.dist - b.dist);
 
     for (const s of sectors) {
-      if (!this.fetchedSectors.has(s.key) && !this.queuedSectors.has(s.key)) {
+      if (!this.fetchedSectors.has(s.key) && !this.queuedSectors.has(s.key) && !this.activeFetches.has(s.key)) {
         this.queuedSectors.add(s.key);
-        const centerX = (s.sx + 0.5) * SECTOR_SIZE;
-        const centerZ = (s.sz + 0.5) * SECTOR_SIZE;
         this.requestQueue.push({
-          worldX: centerX,
-          worldZ: centerZ,
+          worldX: s.centerX,
+          worldZ: s.centerZ,
           radiusMeters: SECTOR_SIZE / 2 + 60,
           sectorKey: s.key
         });
       }
     }
+
+    // Sort queue strictly by distance to player current position
+    this.requestQueue.sort((a, b) => {
+      const distA = Math.hypot(a.worldX - playerWorldX, a.worldZ - playerWorldZ);
+      const distB = Math.hypot(b.worldX - playerWorldX, b.worldZ - playerWorldZ);
+      return distA - distB;
+    });
 
     this.processRequestQueue();
   }
@@ -144,9 +185,17 @@ export class OsmDataProvider {
     this.isProcessingQueue = true;
 
     while (this.requestQueue.length > 0) {
+      // Re-sort remaining queue by distance to live player position
+      this.requestQueue.sort((a, b) => {
+        const distA = Math.hypot(a.worldX - this.playerPos.x, a.worldZ - this.playerPos.z);
+        const distB = Math.hypot(b.worldX - this.playerPos.x, b.worldZ - this.playerPos.z);
+        return distA - distB;
+      });
+
       const task = this.requestQueue.shift();
       const res = await this.fetchSectorByWorld(task.worldX, task.worldZ, task.radiusMeters, task.sectorKey);
-      // If loaded from network, wait 1100ms. If loaded from local disk cache, instant 0ms!
+
+      // If loaded from network, wait 1100ms. If from local disk cache, instant 0ms!
       if (!res || !res.fromCache) {
         await new Promise(resolve => setTimeout(resolve, 1100));
       }
@@ -218,8 +267,11 @@ export class OsmDataProvider {
       success = true;
       fromCache = true;
     } else {
-      // 2. Query network mirror if not in cache
+      // 2. Query network mirror if not in cache (with 7.5s timeout per mirror)
       for (const mirror of this.overpassMirrors) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 7500);
+
         try {
           const res = await fetch(mirror, {
             method: 'POST',
@@ -227,8 +279,10 @@ export class OsmDataProvider {
               'Content-Type': 'application/x-www-form-urlencoded',
               'User-Agent': 'PixelPlanet3D/1.0 (tester@pixelplanet.local)'
             },
-            body: 'data=' + encodeURIComponent(query)
+            body: 'data=' + encodeURIComponent(query),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
 
           if (res.ok) {
             const data = await res.json();
@@ -240,6 +294,7 @@ export class OsmDataProvider {
             break;
           }
         } catch (err) {
+          clearTimeout(timeoutId);
           // try next mirror
         }
       }
@@ -247,8 +302,15 @@ export class OsmDataProvider {
 
     if (sectorKey) {
       this.activeFetches.delete(sectorKey);
-      this.fetchedSectors.add(sectorKey);
       this.queuedSectors.delete(sectorKey);
+
+      if (success) {
+        this.fetchedSectors.add(sectorKey);
+        this.failedSectors.delete(sectorKey);
+      } else {
+        // Retry after 12s cooldown if network failed
+        this.failedSectors.set(sectorKey, Date.now() + 12000);
+      }
     }
 
     if (success && this.onFeaturesLoaded) {
