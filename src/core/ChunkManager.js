@@ -20,7 +20,7 @@ export class ChunkManager {
     this.buildQueue = []; // Chunks queued to be built
     this.lastPlayerChunk = { cx: null, cz: null };
 
-    this.maxChunksPerFrame = 2; // Process 2 chunks per frame to keep 60 FPS silky smooth
+    this.maxChunksPerFrame = 4; // Process 4 chunks per frame for faster streaming
     this.totalVoxelsRendered = 0;
   }
 
@@ -104,6 +104,9 @@ export class ChunkManager {
       }
     }
 
+    // Always sort entire build queue so chunks in front of player build first
+    this.buildQueue.sort((a, b) => a.priority - b.priority);
+
     // Unload chunks outside render distance + buffer
     const unloadDistSq = (R + 2) * (R + 2);
     for (const [key, chunk] of this.activeChunks.entries()) {
@@ -126,7 +129,11 @@ export class ChunkManager {
       const task = this.buildQueue.shift();
       if (this.activeChunks.has(task.key)) continue;
 
-      this.generateAndBuildChunk(task.cx, task.cz, task.key);
+      try {
+        this.generateAndBuildChunk(task.cx, task.cz, task.key);
+      } catch (err) {
+        console.error(`Error generating chunk ${task.key}:`, err);
+      }
       buildsThisFrame++;
     }
   }
@@ -210,25 +217,29 @@ export class ChunkManager {
     for (const [key, chunk] of this.activeChunks.entries()) {
       if (!chunk.usedOsm) {
         const testVoxels = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
-        if (this.osmProvider.populateChunk(chunk.cx, chunk.cz, testVoxels)) {
-          // Real OSM data has arrived for this chunk! Rebuild mesh
-          if (chunk.mesh) {
-            this.scene.remove(chunk.mesh);
-            chunk.mesh.geometry.dispose();
+        try {
+          if (this.osmProvider.populateChunk(chunk.cx, chunk.cz, testVoxels)) {
+            // Real OSM data has arrived for this chunk! Rebuild mesh
+            if (chunk.mesh) {
+              this.scene.remove(chunk.mesh);
+              chunk.mesh.geometry.dispose();
+            }
+            const newGeo = VoxelMesher.buildMesh(testVoxels);
+            if (newGeo) {
+              const mesh = new THREE.Mesh(newGeo, this.material);
+              mesh.position.set(
+                chunk.cx * CHUNK_SIZE_X * VOXEL_SIZE,
+                0,
+                chunk.cz * CHUNK_SIZE_Z * VOXEL_SIZE
+              );
+              this.scene.add(mesh);
+              chunk.mesh = mesh;
+            }
+            chunk.voxels = testVoxels;
+            chunk.usedOsm = true;
           }
-          const newGeo = VoxelMesher.buildMesh(testVoxels);
-          if (newGeo) {
-            const mesh = new THREE.Mesh(newGeo, this.material);
-            mesh.position.set(
-              chunk.cx * CHUNK_SIZE_X * VOXEL_SIZE,
-              0,
-              chunk.cz * CHUNK_SIZE_Z * VOXEL_SIZE
-            );
-            this.scene.add(mesh);
-            chunk.mesh = mesh;
-          }
-          chunk.voxels = testVoxels;
-          chunk.usedOsm = true;
+        } catch (err) {
+          console.error(`Error refreshing chunk ${key}:`, err);
         }
       }
     }

@@ -679,6 +679,12 @@ export class OsmDataProvider {
       voxels[idx] = type;
     };
 
+    const getBlock = (x, y, z) => {
+      if (x < 0 || x >= CHUNK_SIZE_X || y < 0 || y >= CHUNK_SIZE_Y || z < 0 || z >= CHUNK_SIZE_Z) return BlockType.AIR;
+      const idx = (y * CHUNK_SIZE_Z + z) * CHUNK_SIZE_X + x;
+      return voxels[idx];
+    };
+
     // 1. Fill ground base with sidewalk / urban pavement
     for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
