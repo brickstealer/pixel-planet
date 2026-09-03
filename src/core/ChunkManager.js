@@ -54,7 +54,7 @@ export class ChunkManager {
 
     // Check and stream new geographic sectors along the flight path
     if (this.osmProvider) {
-      this.osmProvider.checkStreaming(cameraPosition.x, cameraPosition.z);
+      this.osmProvider.checkStreaming(cameraPosition.x, cameraPosition.z, this.renderDistance);
     }
 
     // Process queued chunk builds
@@ -149,7 +149,7 @@ export class ChunkManager {
       usedOsm = this.osmProvider.populateChunk(cx, cz, voxels);
     }
 
-    // If no OSM buildings exist at this location, check if it's an unloaded pending sector
+    // If no OSM buildings exist yet, check if this chunk is in an unloaded pending sector
     if (!usedOsm) {
       const startX = cx * CHUNK_SIZE_X * VOXEL_SIZE;
       const startZ = cz * CHUNK_SIZE_Z * VOXEL_SIZE;
@@ -159,7 +159,7 @@ export class ChunkManager {
       const isLoadedSector = this.osmProvider ? this.osmProvider.isPointInLoadedSector(midX, midZ) : false;
 
       if (!isLoadedSector) {
-        // UNLOADED OSM SECTOR: Generate Yellow & Black Hazard Striped Warning Tiles!
+        // PENDING / UNLOADED OSM SECTOR: Yellow & Black Hazard Warning Stripes!
         const groundY = 20;
         for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
           const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;

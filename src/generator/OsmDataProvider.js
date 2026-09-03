@@ -40,6 +40,7 @@ export class OsmDataProvider {
     this.queuedSectors = new Set();
     this.failedSectors = new Map(); // sectorKey -> retry timestamp
     this.lastCheckPos = { x: 0, z: 0 };
+    this.lastCheckTime = 0;
     this.playerPos = { x: 0, z: 0 };
     this.subwayStations = []; // registry of stations for entrance name resolution
     this.cache = new OsmCache();
@@ -122,27 +123,31 @@ export class OsmDataProvider {
   /**
    * Continually checks and streams OSM sectors as player flies, prioritizing closest sectors
    */
-  checkStreaming(playerWorldX, playerWorldZ) {
+  checkStreaming(playerWorldX, playerWorldZ, renderDistChunks = 10) {
     this.playerPos = { x: playerWorldX, z: playerWorldZ };
+    const now = Date.now();
+
+    const distSinceCheck = Math.hypot(playerWorldX - this.lastCheckPos.x, playerWorldZ - this.lastCheckPos.z);
+
+    // Run check if player moved > 40m OR every 1.5 seconds (so stationary players also load missing sectors!)
+    if (distSinceCheck < 40 && (now - this.lastCheckTime) < 1500) {
+      return;
+    }
+    this.lastCheckTime = now;
+    this.lastCheckPos = { x: playerWorldX, z: playerWorldZ };
 
     const SECTOR_SIZE = 600;
     const currentSectorX = Math.floor(playerWorldX / SECTOR_SIZE);
     const currentSectorZ = Math.floor(playerWorldZ / SECTOR_SIZE);
-    const currentKey = `${currentSectorX},${currentSectorZ}`;
 
-    const distSinceCheck = Math.hypot(playerWorldX - this.lastCheckPos.x, playerWorldZ - this.lastCheckPos.z);
-    const currentSectorMissing = !this.fetchedSectors.has(currentKey);
+    // Dynamic sector radius: stream sectors to cover render distance (up to 3 sectors = 1800m radius)
+    const viewDistMeters = renderDistChunks * 32;
+    const sectorR = Math.min(3, Math.max(1, Math.ceil(viewDistMeters / SECTOR_SIZE)));
 
-    // If player hasn't moved much and the current sector is already loaded, skip
-    if (distSinceCheck < 75 && this.fetchedSectors.size > 0 && !currentSectorMissing) {
-      return;
-    }
-    this.lastCheckPos = { x: playerWorldX, z: playerWorldZ };
-
-    // Prune distant tasks (> 1400m) to keep the pipeline fresh and unclogged
+    // Prune distant tasks (> 2600m) to keep the pipeline fresh and unclogged
     this.requestQueue = this.requestQueue.filter(task => {
       const d = Math.hypot(task.worldX - playerWorldX, task.worldZ - playerWorldZ);
-      if (d > 1400) {
+      if (d > 2600) {
         this.queuedSectors.delete(task.sectorKey);
         return false;
       }
@@ -150,16 +155,19 @@ export class OsmDataProvider {
     });
 
     const sectors = [];
-    const now = Date.now();
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -sectorR; dx <= sectorR; dx++) {
+      for (let dz = -sectorR; dz <= sectorR; dz++) {
         const sx = currentSectorX + dx;
         const sz = currentSectorZ + dz;
         const key = `${sx},${sz}`;
 
-        // If sector failed recently, wait until cooldown expires
-        if (this.failedSectors.has(key) && now < this.failedSectors.get(key)) {
-          continue;
+        // Clear expired cooldowns
+        if (this.failedSectors.has(key)) {
+          if (now >= this.failedSectors.get(key)) {
+            this.failedSectors.delete(key);
+          } else {
+            continue;
+          }
         }
 
         const centerX = (sx + 0.5) * SECTOR_SIZE;
@@ -207,11 +215,12 @@ export class OsmDataProvider {
       });
 
       const task = this.requestQueue.shift();
+      this.queuedSectors.delete(task.sectorKey);
       const res = await this.fetchSectorByWorld(task.worldX, task.worldZ, task.radiusMeters, task.sectorKey);
 
-      // If loaded from network, wait 1100ms. If from local disk cache, instant 0ms!
+      // If loaded from network, wait 800ms. If from local disk cache, instant 0ms!
       if (!res || !res.fromCache) {
-        await new Promise(resolve => setTimeout(resolve, 1100));
+        await new Promise(resolve => setTimeout(resolve, 800));
       }
     }
 
