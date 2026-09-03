@@ -38,6 +38,7 @@ export class OsmDataProvider {
     this.isProcessingQueue = false;
     this.queuedSectors = new Set();
     this.lastCheckPos = { x: 0, z: 0 };
+    this.subwayStations = []; // registry of stations for entrance name resolution
 
     this.overpassMirrors = [
       'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
@@ -82,6 +83,7 @@ export class OsmDataProvider {
     this.anchorLon = lon;
     this.spatialBuckets.clear();
     this.features = [];
+    this.subwayStations = [];
     this.fetchedSectors.clear();
     this.activeFetches.clear();
 
@@ -251,11 +253,25 @@ export class OsmDataProvider {
           const mx = (elem.lon - this.anchorLon) * (111320 * Math.cos(this.anchorLat * Math.PI / 180));
           const mz = -(elem.lat - this.anchorLat) * 110540;
 
+          // Register station center for entrance lookup
+          if (tags.station === 'subway' || (tags.railway === 'station' && (tags.subway === 'yes' || tags.station === 'subway'))) {
+            const sName = tags['name:ru'] || tags.name || tags['name:en'] || null;
+            if (sName) {
+              this.subwayStations.push({
+                name: sName,
+                line: tags.line || tags.network || tags.operator || null,
+                x: mx,
+                z: mz
+              });
+            }
+          }
+
           let category = tags.amenity || tags.shop || tags.tourism || tags.historic;
           if (isSubway) category = 'subway';
           else if (isRailway) category = 'railway';
 
-          let name = tags['name:ru'] || tags.name || tags['name:en'] || tags.brand;
+          const stationTag = tags.station || tags['station:name'] || tags['subway:name'] || null;
+          let name = tags['name:ru'] || tags.name || tags['name:en'] || stationTag || tags.brand;
           if (!name) {
             if (tags.railway === 'subway_entrance') {
               name = tags.ref ? `Вход в метро (Выход №${tags.ref})` : 'Вход в метро';
@@ -267,7 +283,9 @@ export class OsmDataProvider {
           const poi = {
             id: elem.id,
             name: name,
-            brand: tags.brand || tags.network || tags.operator || null,
+            stationName: stationTag,
+            ref: tags.ref || null,
+            brand: tags.brand || tags.network || tags.operator || tags.line || null,
             category: category,
             isSubway: isSubway,
             cuisine: tags.cuisine || null,
@@ -784,6 +802,19 @@ export class OsmDataProvider {
     return tags.amenity || tags.shop || tags.tourism || 'Заведение';
   }
 
+  findNearestSubwayStation(worldX, worldZ, maxDist = 450) {
+    let nearest = null;
+    let minDist = Infinity;
+    for (const st of this.subwayStations) {
+      const d = Math.hypot(worldX - st.x, worldZ - st.z);
+      if (d < minDist && d < maxDist) {
+        minDist = d;
+        nearest = st;
+      }
+    }
+    return nearest;
+  }
+
   /**
    * Find building/road/POI feature at world coordinates (worldX, worldZ)
    */
@@ -834,22 +865,69 @@ export class OsmDataProvider {
       if (feat.type === 'poi') {
         const dist = Math.hypot(worldX - feat.x, worldZ - feat.z);
         if (dist < 32) {
+          let poiTitle = feat.name;
+
+          // Resolve Metro station name for subway entrances
+          if (feat.isSubway) {
+            let stName = feat.stationName;
+            if (!stName) {
+              const nearestSt = this.findNearestSubwayStation(feat.x, feat.z);
+              if (nearestSt) stName = nearestSt.name;
+            }
+            if (stName) {
+              poiTitle = `${stName} (${feat.ref ? `Выход №${feat.ref}` : 'Вход'})`;
+            }
+          }
+
           nearbyPois.push({
-            name: feat.name,
+            name: poiTitle,
             brand: feat.brand,
             category: feat.category,
             cuisine: feat.cuisine,
             openingHours: feat.openingHours,
-            icon: feat.icon
+            icon: feat.icon,
+            isSubway: feat.isSubway,
+            ref: feat.ref,
+            x: feat.x,
+            z: feat.z
           });
         }
       }
     }
 
-    // If no building, check if aiming at a standalone monument or outdoor venue
+    // If no building, check if aiming at a standalone monument, outdoor venue, or subway entrance
     if (!targetBuilding) {
       if (nearbyPois.length > 0) {
         const p = nearbyPois[0];
+
+        // Specific handling for Subway Entrances
+        if (p.isSubway || p.category === 'subway' || (p.name && p.name.toLowerCase().includes('метро'))) {
+          let stationName = p.stationName;
+          let line = p.brand;
+          if (!stationName) {
+            const nearestSt = this.findNearestSubwayStation(p.x, p.z);
+            if (nearestSt) {
+              stationName = nearestSt.name;
+              if (!line) line = nearestSt.line;
+            }
+          }
+
+          const exitText = p.ref ? `Выход №${p.ref}` : (p.name && p.name.includes('Выход') ? p.name : 'Вход в метро');
+          const title = stationName ? `🚇 ${stationName}` : (p.name || '🚇 Станция метро');
+          const subtitle = stationName ? `${exitText}${line ? ` • ${line}` : ''}` : (nearestStreetName ? `ок. ${nearestStreetName}` : 'Вход в метро');
+
+          return {
+            name: title,
+            address: subtitle,
+            city: null,
+            levels: 1,
+            height: 4,
+            buildingType: 'Станция метро',
+            amenity: 'subway',
+            pois: nearbyPois
+          };
+        }
+
         return {
           name: `${p.icon} ${p.name}`,
           address: nearestStreetName ? `ок. ${nearestStreetName}` : (p.openingHours ? `Часы: ${p.openingHours}` : null),
