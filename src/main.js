@@ -121,22 +121,8 @@ osmProvider.onFeaturesLoaded = () => {
 };
 const controls = new FlightControls(camera, renderer.domElement);
 
-// --- 6. Worldwide City Presets UI & Teleportation ---
+// --- 6. Teleportation & City Navigation ---
 let currentCity = FAMOUS_CITIES[0]; // Manhattan default
-const presetsContainer = document.getElementById('presets-container');
-
-FAMOUS_CITIES.forEach((city, index) => {
-  const chip = document.createElement('button');
-  chip.className = `preset-chip ${index === 0 ? 'active' : ''}`;
-  chip.textContent = city.name.split(',')[0];
-  chip.title = city.zoomDesc;
-  chip.addEventListener('click', () => {
-    document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
-    chip.classList.add('active');
-    teleportToCity(city);
-  });
-  presetsContainer.appendChild(chip);
-});
 
 async function teleportToCity(city) {
   currentCity = city;
@@ -223,8 +209,6 @@ async function selectSearchResult(target) {
     zoomDesc: target.subtitle
   };
 
-  // Remove active state from preset chips
-  document.querySelectorAll('.preset-chip').forEach(c => c.classList.remove('active'));
   await teleportToCity(customCity);
 
   setTimeout(() => {
@@ -626,11 +610,6 @@ async function bootApp() {
           if (renderSlider) renderSlider.value = saved.renderDist;
           if (renderLabel) renderLabel.textContent = `${saved.renderDist} чанков`;
         }
-
-        // Match active preset chip
-        document.querySelectorAll('.preset-chip').forEach(c => {
-          c.classList.toggle('active', c.textContent.trim().toLowerCase() === saved.city.name.split(',')[0].trim().toLowerCase());
-        });
 
         // Initialize OSM anchor around saved city
         chunkManager.clearAll();

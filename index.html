@@ -38,15 +38,48 @@
         <div id="search-dropdown" class="search-dropdown" style="display: none;"></div>
       </div>
 
-      <!-- Preset Worldwide Landmarks -->
-      <div class="presets-container" id="presets-container">
-        <!-- Injected via JS -->
-      </div>
     </header>
 
-    <!-- Middle HUD: Telemetry & Environment -->
-    <div id="middle-hud">
-      <!-- Left: GPS & Flight Telemetry -->
+    <!-- Top Left Stack: Speedometer & Time of Day (Equal Width) -->
+    <div id="top-left-stack" class="top-left-stack hud-interactive">
+      <!-- Speedometer Card -->
+      <div class="speedometer-card glass-panel">
+        <div class="hud-card-header">
+          <span class="hud-card-title">СКОРОСТЬ ПОЛЕТА</span>
+          <span class="hud-card-unit">КМ / Ч</span>
+        </div>
+        <div class="speed-content">
+          <div class="speed-value" id="speed-val">0</div>
+          <div class="speed-bar-container">
+            <div class="speed-bar-fill" id="speed-bar"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Time of Day & Render Distance Card -->
+      <div class="controls-card glass-panel">
+        <div class="hud-card-header">
+          <span class="hud-card-title">ВРЕМЯ СУТОК</span>
+        </div>
+        <div class="time-buttons">
+          <button class="time-btn active" data-time="day">ДЕНЬ</button>
+          <button class="time-btn" data-time="sunset">ЗАКАТ</button>
+          <button class="time-btn" data-time="night">НОЧЬ</button>
+        </div>
+
+        <div class="render-dist-section">
+          <div class="dist-label-row">
+            <span>ДАЛЬНОСТЬ ОБЗОРА:</span>
+            <span id="render-dist-val">6 чанков</span>
+          </div>
+          <input id="render-dist-slider" type="range" min="4" max="10" value="6" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Bar: GPS Telemetry (Left), Controls Hint (Center), Target & Status (Right) -->
+    <footer id="bottom-bar">
+      <!-- Left: GPS & Flight Telemetry Block -->
       <div class="telemetry-card glass-panel hud-interactive">
         <div class="title">
           <span>GPS ТЕЛЕМЕТРИЯ</span>
@@ -72,40 +105,6 @@
         <div class="stat-row">
           <span class="stat-label">АКТИВНО ЧАНКОВ:</span>
           <span id="stat-chunks-count" class="stat-highlight">0</span>
-        </div>
-      </div>
-
-      <!-- Right: Environment & Controls -->
-      <div class="controls-card glass-panel hud-interactive">
-        <div style="font-size: 0.9rem; font-weight: 700; color: var(--accent-cyan); margin-bottom: 4px;">
-          ВРЕМЯ СУТОК
-        </div>
-        <div class="time-buttons">
-          <button class="time-btn active" data-time="day">ДЕНЬ</button>
-          <button class="time-btn" data-time="sunset">ЗАКАТ</button>
-          <button class="time-btn" data-time="night">НОЧЬ</button>
-        </div>
-
-        <div style="margin-top: 10px; font-size: 0.8rem; color: var(--text-dim);">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-            <span>ДАЛЬНОСТЬ ОБЗОРА:</span>
-            <span id="render-dist-val" style="color: #fff; font-weight: 600;">6 чанков</span>
-          </div>
-          <input id="render-dist-slider" type="range" min="4" max="10" value="6" style="width: 100%; cursor: pointer;" />
-        </div>
-      </div>
-    </div>
-
-    <!-- Bottom Bar: Speedometer & System Status -->
-    <footer id="bottom-bar">
-      <!-- Speedometer -->
-      <div class="speedometer-card glass-panel hud-interactive">
-        <div>
-          <div class="speed-value" id="speed-val">0</div>
-          <div class="speed-unit">KM / H [СКОРОСТЬ]</div>
-        </div>
-        <div class="speed-bar-container">
-          <div class="speed-bar-fill" id="speed-bar"></div>
         </div>
       </div>
 
