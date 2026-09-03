@@ -23,6 +23,8 @@ export const BlockType = {
   SNOW: 16,
   METAL: 17,
   ROAD_MARKING: 18,
+  MONUMENT_BRONZE: 19,
+  GOLD: 20,
 };
 
 // RGB Colors in [0..1] range for vertex colors
@@ -46,6 +48,8 @@ export const BlockPalette = {
   [BlockType.TREE_LEAVES]: [0.18, 0.52, 0.16],
   [BlockType.SNOW]: [0.95, 0.96, 0.98],
   [BlockType.METAL]: [0.45, 0.48, 0.52],
+  [BlockType.MONUMENT_BRONZE]: [0.62, 0.46, 0.28],
+  [BlockType.GOLD]: [0.95, 0.78, 0.24],
 };
 
 // Return whether block is transparent/non-solid to neighbor face culling

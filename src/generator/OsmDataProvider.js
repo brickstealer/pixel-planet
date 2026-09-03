@@ -619,6 +619,64 @@ export class OsmDataProvider {
       }
     }
 
+    // 4. Rasterize Standalone POIs (Monuments, Statues, Fountains, Food Kiosks)
+    for (const feat of nearbyFeatures) {
+      if (feat.type !== 'poi') continue;
+
+      const lx = Math.floor((feat.x - startX) / VOXEL_SIZE);
+      const lz = Math.floor((feat.z - startZ) / VOXEL_SIZE);
+
+      // Check if POI is inside or near chunk bounds
+      if (lx < -1 || lx > CHUNK_SIZE_X || lz < -1 || lz > CHUNK_SIZE_Z) continue;
+
+      hasFeatures = true;
+      const cat = (feat.category || '').toLowerCase();
+      const name = (feat.name || '').toLowerCase();
+
+      // A. Monument, Statue, Memorial, Obelisk
+      if (cat.includes('monument') || cat.includes('memorial') || cat.includes('statue') || cat.includes('artwork') || name.includes('памятник') || name.includes('монумент') || name.includes('обелиск')) {
+        // Step 1: Broad Stone Pedestal Base (3x3 blocks at ground level + 1)
+        for (let ox = -1; ox <= 1; ox++) {
+          for (let oz = -1; oz <= 1; oz++) {
+            setBlock(lx + ox, groundY + 1, lz + oz, BlockType.STONE);
+          }
+        }
+        // Step 2: Concrete Pedestal Core
+        setBlock(lx, groundY + 2, lz, BlockType.BUILDING_CONCRETE);
+
+        // Step 3: Patinated Bronze Column & Statue Figure (up to +5 voxels)
+        for (let y = groundY + 3; y <= groundY + 5; y++) {
+          setBlock(lx, y, lz, BlockType.MONUMENT_BRONZE);
+        }
+        // Sculpture details (arms / wings / cross)
+        setBlock(lx - 1, groundY + 4, lz, BlockType.MONUMENT_BRONZE);
+        setBlock(lx + 1, groundY + 4, lz, BlockType.MONUMENT_BRONZE);
+
+        // Step 4: Golden Crown / Peak / Head
+        setBlock(lx, groundY + 6, lz, BlockType.GOLD);
+
+      } else if (cat.includes('fountain')) {
+        // B. Fountain (3x3 Stone basin with water in middle)
+        for (let ox = -1; ox <= 1; ox++) {
+          for (let oz = -1; oz <= 1; oz++) {
+            const isEdge = (Math.abs(ox) === 1 || Math.abs(oz) === 1);
+            setBlock(lx + ox, groundY + 1, lz + oz, isEdge ? BlockType.STONE : BlockType.WATER);
+          }
+        }
+        setBlock(lx, groundY + 2, lz, BlockType.WATER);
+
+      } else if (cat.includes('kiosk') || cat.includes('fast_food')) {
+        // C. Street Food Booth / Kiosk (2x2 with roof)
+        for (let ox = 0; ox <= 1; ox++) {
+          for (let oz = 0; oz <= 1; oz++) {
+            setBlock(lx + ox, groundY + 1, lz + oz, BlockType.BUILDING_BRICK);
+            setBlock(lx + ox, groundY + 2, lz + oz, BlockType.WINDOW_LIT);
+            setBlock(lx + ox, groundY + 3, lz + oz, BlockType.BUILDING_ROOF);
+          }
+        }
+      }
+    }
+
     return isSectorActive || hasFeatures;
   }
 
