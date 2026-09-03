@@ -381,6 +381,7 @@ const targetAddress = document.getElementById('target-address');
 const targetLevels = document.getElementById('target-levels');
 const targetHeight = document.getElementById('target-height');
 const targetType = document.getElementById('target-type');
+const targetPois = document.getElementById('target-pois');
 const crosshairEl = document.getElementById('crosshair');
 
 let inspectTimer = 0;
@@ -409,8 +410,8 @@ function updateBuildingInspection(dt) {
     const hit = intersects[0];
     const hitPoint = hit.point;
 
-    // Check if hit point is elevated above ground street plane (> 20.5m) -> building structure
-    if (hitPoint.y > 20.5) {
+    // Check hit on ground or building structure (ground is at y=20)
+    if (hitPoint.y > 19.5) {
       const info = osmProvider.getFeatureAtPoint(hitPoint.x, hitPoint.z);
 
       if (info) {
@@ -421,7 +422,24 @@ function updateBuildingInspection(dt) {
           targetAddress.textContent = info.address || (info.city ? `г. ${info.city}` : 'Адрес не указан в OSM');
           targetLevels.textContent = `${info.levels} эт.`;
           targetHeight.textContent = `${info.height} м`;
-          targetType.textContent = info.buildingType || 'Здание';
+          targetType.textContent = info.buildingType || 'Объект';
+
+          // Display POIs (Cafes, McDonald's, shops, monuments) inside/near target
+          if (info.pois && info.pois.length > 0 && targetPois) {
+            targetPois.style.display = 'flex';
+            targetPois.innerHTML = info.pois.slice(0, 3).map(p => `
+              <div class="target-poi-item">
+                <div class="target-poi-main">
+                  <span>${p.icon}</span>
+                  <span>${p.name}</span>
+                </div>
+                ${p.openingHours ? `<span class="target-poi-time">${p.openingHours}</span>` : ''}
+              </div>
+            `).join('');
+          } else if (targetPois) {
+            targetPois.style.display = 'none';
+            targetPois.innerHTML = '';
+          }
         }
         if (crosshairEl) crosshairEl.classList.add('targeted');
         return;

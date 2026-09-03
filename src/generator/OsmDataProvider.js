@@ -182,6 +182,10 @@ export class OsmDataProvider {
         relation["leisure"="park"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         way["landuse"="grass"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         way["amenity"="parking"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["amenity"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["shop"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["tourism"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["historic"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
       );
       out geom;
     `.trim();
@@ -223,13 +227,39 @@ export class OsmDataProvider {
   }
 
   /**
-   * Process raw Overpass data with geom arrays (both ways & relation multipolygons)
+   * Process raw Overpass data with geom arrays (both ways & relation multipolygons & POI nodes)
    */
   processOsmData(osmData) {
     if (!osmData || !osmData.elements) return;
 
     for (const elem of osmData.elements) {
       const tags = elem.tags || {};
+
+      // 1. Process Standalone Point of Interest (POI) nodes
+      if (elem.type === 'node') {
+        if (tags.amenity || tags.shop || tags.tourism || tags.historic || tags.cuisine) {
+          const mx = (elem.lon - this.anchorLon) * (111320 * Math.cos(this.anchorLat * Math.PI / 180));
+          const mz = -(elem.lat - this.anchorLat) * 110540;
+
+          const poi = {
+            id: elem.id,
+            name: tags['name:ru'] || tags.name || tags['name:en'] || tags.brand || this.getPoiCategoryName(tags),
+            brand: tags.brand || null,
+            category: tags.amenity || tags.shop || tags.tourism || tags.historic,
+            cuisine: tags.cuisine || null,
+            openingHours: tags.opening_hours || null,
+            icon: this.getPoiIcon(tags),
+            type: 'poi',
+            x: mx,
+            z: mz,
+            bounds: [mx - 6, mz - 6, mx + 6, mz + 6]
+          };
+
+          this.addFeatureToSpatialBuckets(poi);
+          this.features.push(poi);
+        }
+        continue;
+      }
 
       // Gather outer geometry rings for both ways and relation multipolygons
       const geometryList = [];
@@ -612,11 +642,48 @@ export class OsmDataProvider {
     return false;
   }
 
+  getPoiIcon(tags) {
+    if (tags.amenity === 'fast_food') return '🍔';
+    if (tags.amenity === 'cafe') return '☕';
+    if (tags.amenity === 'restaurant') return '🍽️';
+    if (tags.amenity === 'bar' || tags.amenity === 'pub') return '🍺';
+    if (tags.shop === 'supermarket' || tags.shop === 'convenience' || tags.shop === 'grocery') return '🛒';
+    if (tags.shop) return '🛍️';
+    if (tags.historic === 'monument' || tags.historic === 'memorial') return '🗿';
+    if (tags.tourism === 'attraction' || tags.tourism === 'museum') return '🏛️';
+    if (tags.tourism === 'hotel') return '🏨';
+    if (tags.tourism === 'viewpoint') return '🔭';
+    if (tags.amenity === 'pharmacy') return '💊';
+    if (tags.amenity === 'bank' || tags.amenity === 'atm') return '🏦';
+    if (tags.amenity === 'cinema' || tags.amenity === 'theatre') return '🎭';
+    if (tags.amenity === 'fuel') return '⛽';
+    if (tags.amenity === 'hospital' || tags.amenity === 'clinic') return '🏥';
+    return '📍';
+  }
+
+  getPoiCategoryName(tags) {
+    if (tags.amenity === 'fast_food') return tags.cuisine ? `Фастфуд (${tags.cuisine})` : 'Фастфуд';
+    if (tags.amenity === 'cafe') return 'Кофейня';
+    if (tags.amenity === 'restaurant') return 'Ресторан';
+    if (tags.amenity === 'bar') return 'Бар';
+    if (tags.shop === 'supermarket') return 'Супермаркет';
+    if (tags.shop) return `Магазин (${tags.shop})`;
+    if (tags.historic === 'monument') return 'Памятник';
+    if (tags.historic === 'memorial') return 'Мемориал';
+    if (tags.tourism === 'museum') return 'Музей';
+    if (tags.tourism === 'attraction') return 'Достопримечательность';
+    if (tags.tourism === 'hotel') return 'Отель';
+    if (tags.amenity === 'pharmacy') return 'Аптека';
+    if (tags.amenity === 'bank') return 'Банк';
+    if (tags.amenity === 'cinema') return 'Кинотеатр';
+    return tags.amenity || tags.shop || tags.tourism || 'Заведение';
+  }
+
   /**
-   * Find building/road feature at world coordinates (worldX, worldZ)
+   * Find building/road/POI feature at world coordinates (worldX, worldZ)
    */
   getFeatureAtPoint(worldX, worldZ) {
-    const margin = 8.0;
+    const margin = 12.0;
     const candidates = this.getFeaturesInBounds(worldX - margin, worldZ - margin, worldX + margin, worldZ + margin);
 
     // 1. Look for building containing or closest to this point
@@ -633,14 +700,12 @@ export class OsmDataProvider {
         const cx = (feat.bounds[0] + feat.bounds[2]) / 2;
         const cz = (feat.bounds[1] + feat.bounds[3]) / 2;
         const dist = Math.hypot(worldX - cx, worldZ - cz);
-        if (dist < minBuildingDist && dist < 22) {
+        if (dist < minBuildingDist && dist < 26) {
           minBuildingDist = dist;
           targetBuilding = feat;
         }
       }
     }
-
-    if (!targetBuilding) return null;
 
     // 2. Find nearest named road if building has no explicit address
     let nearestStreetName = null;
@@ -658,14 +723,54 @@ export class OsmDataProvider {
       }
     }
 
+    // 3. Find POIs inside or near this building / point
+    const nearbyPois = [];
+    for (const feat of candidates) {
+      if (feat.type === 'poi') {
+        const dist = Math.hypot(worldX - feat.x, worldZ - feat.z);
+        if (dist < 32) {
+          nearbyPois.push({
+            name: feat.name,
+            brand: feat.brand,
+            category: feat.category,
+            cuisine: feat.cuisine,
+            openingHours: feat.openingHours,
+            icon: feat.icon
+          });
+        }
+      }
+    }
+
+    // If no building, check if aiming at a standalone monument or outdoor venue
+    if (!targetBuilding) {
+      if (nearbyPois.length > 0) {
+        const p = nearbyPois[0];
+        return {
+          name: `${p.icon} ${p.name}`,
+          address: nearestStreetName ? `ок. ${nearestStreetName}` : (p.openingHours ? `Часы: ${p.openingHours}` : null),
+          city: null,
+          levels: 1,
+          height: 4,
+          buildingType: p.category,
+          amenity: p.category,
+          pois: nearbyPois
+        };
+      }
+      return null;
+    }
+
+    const primaryPoi = nearbyPois.length > 0 ? nearbyPois[0] : null;
+    const title = targetBuilding.name || (primaryPoi ? `${primaryPoi.icon} ${primaryPoi.name}` : null) || (targetBuilding.amenity ? `${targetBuilding.amenity.toUpperCase()}` : null);
+
     return {
-      name: targetBuilding.name || (targetBuilding.amenity ? `${targetBuilding.amenity.toUpperCase()}` : null),
+      name: title,
       address: targetBuilding.address || (nearestStreetName ? `ок. ${nearestStreetName}` : null),
       city: targetBuilding.city,
       levels: targetBuilding.levels,
       height: targetBuilding.height,
       buildingType: targetBuilding.buildingType,
-      amenity: targetBuilding.amenity
+      amenity: targetBuilding.amenity,
+      pois: nearbyPois
     };
   }
 }
