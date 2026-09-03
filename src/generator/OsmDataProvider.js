@@ -500,7 +500,10 @@ export class OsmDataProvider {
         const pts = [];
         let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
 
+        let sumLat = 0, sumLon = 0;
         for (const pt of geom) {
+          sumLat += pt.lat;
+          sumLon += pt.lon;
           const mx = (pt.lon - this.anchorLon) * (111320 * Math.cos(this.anchorLat * Math.PI / 180));
           const mz = -(pt.lat - this.anchorLat) * 110540;
           pts.push([mx, mz]);
@@ -509,6 +512,9 @@ export class OsmDataProvider {
           if (mz < minZ) minZ = mz;
           if (mz > maxZ) maxZ = mz;
         }
+
+        const centerLat = sumLat / (geom.length || 1);
+        const centerLon = sumLon / (geom.length || 1);
 
         // Deduplicate closing point
         if (pts.length > 3 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) {
@@ -579,6 +585,41 @@ export class OsmDataProvider {
                               nameLower.includes('basilica') ||
                               nameLower.includes('church');
 
+          // Exclude hotels, restaurants, cafes and residential buildings from monuments!
+          const isCommercialOrLiving = tags.building === 'hotel' ||
+                                       tags.building === 'apartments' ||
+                                       tags.building === 'residential' ||
+                                       tags.tourism === 'hotel' ||
+                                       tags.amenity === 'restaurant' ||
+                                       tags.amenity === 'cafe' ||
+                                       tags.shop != null ||
+                                       nameLower.includes('campanile') ||
+                                       nameLower.includes('hotel') ||
+                                       nameLower.includes('hôtel') ||
+                                       nameLower.includes('mercure') ||
+                                       nameLower.includes('bistro') ||
+                                       nameLower.includes('pharmacie') ||
+                                       nameLower.includes('résidence');
+
+          // Strict Eiffel Tower detection: only the real monument in Paris on Champ de Mars (or exact replica monuments)
+          const distFromParisEiffel = Math.hypot((centerLat - 48.85837) * 110540, (centerLon - 2.29448) * 73000);
+          const isRealParisEiffel = distFromParisEiffel < 160 && (tags.man_made === 'tower' || tags.tourism === 'attraction' || nameLower.includes('tour eiffel') || nameLower.includes('эйфелева'));
+
+          const isEiffelNameExact = nameLower === 'tour eiffel' ||
+                                    nameLower === 'la tour eiffel' ||
+                                    nameLower === 'eiffel tower' ||
+                                    nameLower === 'эйфелева башня';
+
+          const isEiffelTower = !isCommercialOrLiving && (isRealParisEiffel || (isEiffelNameExact && (tags.man_made === 'tower' || tags.tourism === 'attraction')));
+
+          // Generic Communication / Lattice Towers (Ostankino, Tokyo Tower, radio towers)
+          const isTower = isEiffelTower ||
+                          (!isCommercialOrLiving && (tags.man_made === 'tower' ||
+                          tags['tower:type'] === 'lattice' ||
+                          tags['tower:type'] === 'communication' ||
+                          tags['tower:type'] === 'observation' ||
+                          tags.building === 'tower'));
+
           // Material Palette based on real OSM tags
           let blockType = BlockType.BUILDING_CONCRETE;
           const mat = (tags['building:material'] || '').toLowerCase();
@@ -588,27 +629,44 @@ export class OsmDataProvider {
             blockType = BlockType.BUILDING_BRICK; // Russian red brick
           } else if (isCathedral) {
             blockType = (mat.includes('brick') || mat.includes('red')) ? BlockType.BUILDING_BRICK : BlockType.BUILDING_CONCRETE;
+          } else if (isEiffelTower || isTower) {
+            blockType = BlockType.METAL; // Wrought iron / steel lattice trusswork
           } else if (mat.includes('brick') || tags.building === 'house') {
             blockType = BlockType.BUILDING_BRICK;
-          } else if (mat.includes('glass') || (heightMeters > 38 && !this.isDesertRegion())) {
+          } else if ((mat.includes('glass') || (heightMeters > 38 && !this.isDesertRegion())) && !isTower) {
             blockType = BlockType.BUILDING_GLASS;
           } else if (mat.includes('stone') || this.isDesertRegion()) {
             blockType = BlockType.SAND;
           }
+
+          // Generic Industrial & Utility structures without residential windows
+          const isChimney = tags.man_made === 'chimney' || tags.building === 'chimney';
+          const isIndustrial = isChimney ||
+                               tags.building === 'industrial' ||
+                               tags.building === 'warehouse' ||
+                               tags.building === 'hangar' ||
+                               tags.building === 'garage' ||
+                               tags.building === 'silo' ||
+                               tags.man_made === 'silo' ||
+                               tags.man_made === 'storage_tank';
 
           const feature = {
             id: elem.id,
             name: tags['name:ru'] || tags.name || tags['name:en'] || null,
             address: fullAddress,
             city: city,
-            levels: (isPyramid || isCathedral) ? 1 : levels,
-            height: Math.round(heightMeters),
-            buildingType: isPyramid ? 'Древняя пирамида' : (isSaintBasils ? 'Храм Василия Блаженного (Покровский собор)' : (isCathedral ? 'Православный собор / храм' : (tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание')))),
+            levels: (isEiffelTower || isTower || isPyramid || isCathedral || isChimney) ? 2 : levels,
+            height: isEiffelTower ? 330 : Math.round(heightMeters),
+            buildingType: isPyramid ? 'Древняя пирамида' : (isSaintBasils ? 'Храм Василия Блаженного (Покровский собор)' : (isEiffelTower ? 'Эйфелева башня (ажурная металлическая башня)' : (isCathedral ? 'Православный собор / храм' : (isTower ? 'Теле-/радиобашня' : (isChimney ? 'Промышленная дымовая труба' : (tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание'))))))),
             amenity: tags.amenity || tags.shop || tags.tourism || null,
             type: 'building',
             isPyramid: isPyramid,
             isCathedral: isCathedral,
             isSaintBasils: isSaintBasils,
+            isEiffelTower: isEiffelTower,
+            isTower: isTower,
+            isChimney: isChimney,
+            isIndustrial: isIndustrial,
             points: pts,
             blockType: blockType,
             bounds: [minX, minZ, maxX, maxZ]
@@ -1092,6 +1150,177 @@ export class OsmDataProvider {
         continue;
       }
 
+      // 3.3 Special Architecture: Eiffel Tower (Open-Lattice Wrought Iron Monument)
+      if (feat.isEiffelTower) {
+        const halfWidth = (maxBX - minBX) / 2 || 35;
+        const halfDepth = (maxBZ - minBZ) / 2 || 35;
+        const towerH = Math.min(CHUNK_SIZE_Y - groundY - 2, Math.max(80, Math.floor(feat.height / VOXEL_SIZE)));
+
+        const hP1 = Math.floor(towerH * 0.18); // Platform 1 (~57m)
+        const hP2 = Math.floor(towerH * 0.36); // Platform 2 (~115m)
+        const hP3 = Math.floor(towerH * 0.84); // Platform 3 (~276m)
+
+        for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+          const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+          if (worldVX < minBX - VOXEL_SIZE || worldVX > maxBX + VOXEL_SIZE) continue;
+
+          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+            const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+            if (worldVZ < minBZ - VOXEL_SIZE || worldVZ > maxBZ + VOXEL_SIZE) continue;
+
+            const dx = Math.abs(worldVX - bCenterX);
+            const dz = Math.abs(worldVZ - bCenterZ);
+
+            for (let by = groundY; by <= groundY + towerH; by++) {
+              const dy = by - groundY;
+
+              if (dy <= hP2) {
+                // Lower tiers (ground to Platform 2): 4 massive inclined arched corner pillars!
+                const tLeg = dy / hP2; // 0..1
+                const legCenterDistX = halfWidth * (0.85 - tLeg * 0.52);
+                const legCenterDistZ = halfDepth * (0.85 - tLeg * 0.52);
+                const legThickness = Math.max(3.0, 7.0 - tLeg * 3.5);
+
+                const dLegX = Math.abs(dx - legCenterDistX);
+                const dLegZ = Math.abs(dz - legCenterDistZ);
+                const inCornerPillar = (dLegX <= legThickness && dLegZ <= legThickness);
+
+                // Grand arched gallery connecting pillars
+                const isArch1 = (dy >= hP1 - 4 && dy <= hP1 && (dx <= legCenterDistX + legThickness && dz <= legCenterDistZ + legThickness) && (dx >= legCenterDistX - legThickness || dz >= legCenterDistZ - legThickness));
+
+                // Platform 1 deck
+                const isPlatform1 = (dy === hP1 && dx <= legCenterDistX + 3 && dz <= legCenterDistZ + 3 && (dx >= legCenterDistX - 6 || dz >= legCenterDistZ - 6));
+
+                // Platform 2 deck
+                const isPlatform2 = (dy === hP2 && dx <= legCenterDistX + 3 && dz <= legCenterDistZ + 3);
+
+                if (inCornerPillar || isArch1 || isPlatform1 || isPlatform2) {
+                  const isCrossBrace = (Math.abs(Math.floor((worldVX + worldVZ + dy * 1.5) / 3)) % 2 === 0);
+                  if (isPlatform1 || isPlatform2) {
+                    setBlock(lx, by, lz, BlockType.MONUMENT_BRONZE);
+                  } else if (isCrossBrace || (dy % 4 === 0)) {
+                    setBlock(lx, by, lz, BlockType.METAL);
+                  } else {
+                    setBlock(lx, by, lz, BlockType.STONE);
+                  }
+                }
+              } else if (dy <= hP3) {
+                // Middle / Upper tower: single central tapering square tower with open lattice core
+                const tMid = (dy - hP2) / (hP3 - hP2); // 0..1
+                const curTowerW = Math.max(2.5, halfWidth * 0.33 * (1.0 - tMid * 0.7));
+                const curTowerD = Math.max(2.5, halfDepth * 0.33 * (1.0 - tMid * 0.7));
+
+                if (dx <= curTowerW && dz <= curTowerD) {
+                  const isOuterWall = (dx >= curTowerW - 2.2 || dz >= curTowerD - 2.2);
+                  const isCrossGirder = (dy % 3 === 0);
+
+                  if (isOuterWall || isCrossGirder) {
+                    setBlock(lx, by, lz, BlockType.METAL);
+                  }
+                }
+              } else {
+                // Summit observation deck, broadcasting spire and beacon
+                const isPlatform3 = (dy === hP3 && dx <= 5 && dz <= 5);
+                const isSpire = (dx <= 1.5 && dz <= 1.5);
+                const isBeaconTip = (dy >= towerH - 3 && dx <= 1.0 && dz <= 1.0);
+
+                if (isPlatform3) {
+                  setBlock(lx, by, lz, BlockType.MONUMENT_BRONZE);
+                } else if (isBeaconTip) {
+                  // Glowing summit lighthouse beacon!
+                  setBlock(lx, by, lz, BlockType.WARNING_YELLOW);
+                } else if (isSpire) {
+                  setBlock(lx, by, lz, BlockType.METAL);
+                }
+              }
+            }
+          }
+        }
+        continue;
+      }
+
+      // 3.4 Universal Architecture: TV, Radio & Observation Towers (Ostankino, CN Tower, Fernsehturm, Tokyo Tower)
+      if (feat.isTower && !feat.isEiffelTower) {
+        const halfWidth = (maxBX - minBX) / 2 || 12;
+        const halfDepth = (maxBZ - minBZ) / 2 || 12;
+        const baseRadius = Math.max(6.0, Math.min(halfWidth, halfDepth) || 10);
+        const towerH = bHeightVoxels;
+
+        const hBase = Math.floor(towerH * 0.12);
+        const hPodStart = Math.floor(towerH * 0.62);
+        const hPodEnd = Math.floor(towerH * 0.72);
+        const hSpire = towerH;
+
+        for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+          const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+          if (worldVX < minBX - VOXEL_SIZE || worldVX > maxBX + VOXEL_SIZE) continue;
+
+          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+            const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+            if (worldVZ < minBZ - VOXEL_SIZE || worldVZ > maxBZ + VOXEL_SIZE) continue;
+
+            const distFromCenter = Math.hypot(worldVX - bCenterX, worldVZ - bCenterZ);
+
+            for (let by = groundY; by <= groundY + towerH; by++) {
+              const dy = by - groundY;
+
+              if (dy <= hBase) {
+                // Flared reinforced concrete base
+                const tBase = dy / (hBase || 1);
+                const curR = baseRadius * (1.0 - tBase * 0.58);
+                if (distFromCenter <= curR) {
+                  const isArchHole = (dy < hBase * 0.45 && (Math.abs(worldVX - bCenterX) < 2.0 || Math.abs(worldVZ - bCenterZ) < 2.0));
+                  if (!isArchHole) {
+                    setBlock(lx, by, lz, BlockType.BUILDING_CONCRETE);
+                  }
+                }
+              } else if (dy <= hPodStart) {
+                // Slender smooth concrete shaft (ZERO residential windows!)
+                const shaftR = Math.max(2.5, baseRadius * 0.38);
+                if (distFromCenter <= shaftR) {
+                  setBlock(lx, by, lz, BlockType.BUILDING_CONCRETE);
+                }
+              } else if (dy <= hPodEnd) {
+                // Observation deck & revolving restaurant pod ("Седьмое небо" / Panorama)
+                const shaftR = Math.max(2.5, baseRadius * 0.38);
+                const podT = (dy - hPodStart) / (hPodEnd - hPodStart || 1); // 0..1
+                const podExpansion = Math.sin(podT * Math.PI) * 4.5;
+                const curPodR = shaftR + podExpansion;
+
+                if (distFromCenter <= curPodR) {
+                  const isWindowRow = (dy >= hPodStart + 2 && dy <= hPodEnd - 2);
+                  const isOuter = (distFromCenter >= curPodR - 1.8);
+                  if (isWindowRow && isOuter) {
+                    // Panoramic observation windows
+                    setBlock(lx, by, lz, BlockType.WINDOW_LIT);
+                  } else if (dy === hPodStart || dy === hPodEnd) {
+                    setBlock(lx, by, lz, BlockType.METAL);
+                  } else {
+                    setBlock(lx, by, lz, BlockType.BUILDING_CONCRETE);
+                  }
+                }
+              } else {
+                // Broadcasting antenna mast with alternating red and white aviation bands
+                const spireT = (dy - hPodEnd) / (hSpire - hPodEnd || 1);
+                const curSpireR = Math.max(1.0, 2.2 * (1.0 - spireT * 0.5));
+
+                if (distFromCenter <= curSpireR) {
+                  if (dy >= towerH - 3) {
+                    // Aircraft warning beacon light at summit
+                    setBlock(lx, by, lz, BlockType.WARNING_YELLOW);
+                  } else {
+                    // Alternating red and white aviation safety markings
+                    const isRedBand = (Math.floor(dy / 5) % 2 === 0);
+                    setBlock(lx, by, lz, isRedBand ? BlockType.BUILDING_BRICK : BlockType.BUILDING_CONCRETE);
+                  }
+                }
+              }
+            }
+          }
+        }
+        continue;
+      }
+
       for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
         const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
         if (worldVX < minBX - VOXEL_SIZE || worldVX > maxBX + VOXEL_SIZE) continue;
@@ -1111,11 +1340,12 @@ export class OsmDataProvider {
               if (by === groundY + bHeightVoxels) {
                 setBlock(lx, by, lz, BlockType.BUILDING_ROOF);
               } else if (isPerimeter) {
-                // Windows layout on real facade
+                // Windows layout on real facade: ONLY on living/office/commercial spaces!
+                const isIndustrial = feat.isIndustrial || feat.isChimney;
                 const isWindowHeight = ((by - groundY) % 2 === 1);
                 const isWindowCol = ((lx + lz) % 2 === 0);
 
-                if (isWindowHeight && isWindowCol && (by > groundY + 1)) {
+                if (!isIndustrial && isWindowHeight && isWindowCol && (by > groundY + 1)) {
                   // Glowing window at night
                   const isLit = (Math.sin(worldVX * 7.1 + worldVZ * 11.3 + by * 13.7) > 0.0);
                   setBlock(lx, by, lz, isLit ? BlockType.WINDOW_LIT : BlockType.WINDOW_DARK);

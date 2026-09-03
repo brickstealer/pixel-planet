@@ -1,6 +1,6 @@
 export const CHUNK_SIZE_X = 16;
 export const CHUNK_SIZE_Z = 16;
-export const CHUNK_SIZE_Y = 160; // Up to 320 meters tall for real skyscrapers
+export const CHUNK_SIZE_Y = 180; // Up to 360 meters tall for real skyscrapers and Eiffel Tower
 export const VOXEL_SIZE = 2.0; // 1 voxel = 2.0 meters
 
 export const BlockType = {
