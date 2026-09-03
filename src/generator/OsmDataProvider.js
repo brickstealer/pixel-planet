@@ -186,6 +186,10 @@ export class OsmDataProvider {
         node["shop"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         node["tourism"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
         node["historic"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["railway"="subway_entrance"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["station"="subway"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        way["station"="subway"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
+        node["railway"="station"](${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)});
       );
       out geom;
     `.trim();
@@ -237,15 +241,35 @@ export class OsmDataProvider {
 
       // 1. Process Standalone Point of Interest (POI) nodes
       if (elem.type === 'node') {
-        if (tags.amenity || tags.shop || tags.tourism || tags.historic || tags.cuisine) {
+        const isSubway = tags.railway === 'subway_entrance' ||
+                         tags.station === 'subway' ||
+                         tags.subway === 'yes' ||
+                         (tags.railway === 'station' && tags.station === 'subway');
+        const isRailway = tags.railway === 'station';
+
+        if (tags.amenity || tags.shop || tags.tourism || tags.historic || tags.cuisine || isSubway || isRailway) {
           const mx = (elem.lon - this.anchorLon) * (111320 * Math.cos(this.anchorLat * Math.PI / 180));
           const mz = -(elem.lat - this.anchorLat) * 110540;
 
+          let category = tags.amenity || tags.shop || tags.tourism || tags.historic;
+          if (isSubway) category = 'subway';
+          else if (isRailway) category = 'railway';
+
+          let name = tags['name:ru'] || tags.name || tags['name:en'] || tags.brand;
+          if (!name) {
+            if (tags.railway === 'subway_entrance') {
+              name = tags.ref ? `Вход в метро (Выход №${tags.ref})` : 'Вход в метро';
+            } else {
+              name = this.getPoiCategoryName(tags);
+            }
+          }
+
           const poi = {
             id: elem.id,
-            name: tags['name:ru'] || tags.name || tags['name:en'] || tags.brand || this.getPoiCategoryName(tags),
-            brand: tags.brand || null,
-            category: tags.amenity || tags.shop || tags.tourism || tags.historic,
+            name: name,
+            brand: tags.brand || tags.network || tags.operator || null,
+            category: category,
+            isSubway: isSubway,
             cuisine: tags.cuisine || null,
             openingHours: tags.opening_hours || null,
             icon: this.getPoiIcon(tags),
@@ -674,6 +698,24 @@ export class OsmDataProvider {
             setBlock(lx + ox, groundY + 3, lz + oz, BlockType.BUILDING_ROOF);
           }
         }
+      } else if (cat.includes('subway') || name.includes('метро') || feat.isSubway) {
+        // D. Subway Station Entrance Pavilion (3x3 with canopy and descent stairs)
+        for (let ox = -1; ox <= 1; ox++) {
+          for (let oz = -1; oz <= 1; oz++) {
+            const isRim = (Math.abs(ox) === 1 || oz === -1);
+            if (isRim) {
+              setBlock(lx + ox, groundY + 1, lz + oz, BlockType.METAL);
+            } else {
+              // Cutout stairwell descent into ground
+              setBlock(lx + ox, groundY, lz + oz, BlockType.AIR);
+              setBlock(lx + ox, groundY - 1, lz + oz, BlockType.STONE);
+            }
+            // Glass canopy overhead
+            setBlock(lx + ox, groundY + 3, lz + oz, BlockType.BUILDING_GLASS);
+          }
+        }
+        // Glowing metro entrance sign
+        setBlock(lx, groundY + 2, lz + 1, BlockType.WINDOW_LIT);
       }
     }
 
@@ -701,6 +743,8 @@ export class OsmDataProvider {
   }
 
   getPoiIcon(tags) {
+    if (tags.railway === 'subway_entrance' || tags.station === 'subway' || tags.subway === 'yes') return '🚇';
+    if (tags.railway === 'station') return '🚆';
     if (tags.amenity === 'fast_food') return '🍔';
     if (tags.amenity === 'cafe') return '☕';
     if (tags.amenity === 'restaurant') return '🍽️';
@@ -720,6 +764,9 @@ export class OsmDataProvider {
   }
 
   getPoiCategoryName(tags) {
+    if (tags.railway === 'subway_entrance') return tags.ref ? `Выход в метро №${tags.ref}` : 'Вход в метро';
+    if (tags.station === 'subway' || tags.subway === 'yes') return 'Станция метро';
+    if (tags.railway === 'station') return 'Ж/Д Вокзал / Станция';
     if (tags.amenity === 'fast_food') return tags.cuisine ? `Фастфуд (${tags.cuisine})` : 'Фастфуд';
     if (tags.amenity === 'cafe') return 'Кофейня';
     if (tags.amenity === 'restaurant') return 'Ресторан';
