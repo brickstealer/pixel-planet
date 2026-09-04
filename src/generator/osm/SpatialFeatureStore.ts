@@ -163,11 +163,10 @@ export class SpatialFeatureStore {
           minBuildingDist = 0;
           break;
         }
-        const cx = (b.bounds[0] + b.bounds[2]) / 2;
-        const cz = (b.bounds[1] + b.bounds[3]) / 2;
-        const dist = Math.hypot(worldX - cx, worldZ - cz);
-        if (dist < minBuildingDist && dist < 26) {
-          minBuildingDist = dist;
+        // Small tolerance (up to 2.5m, ~1 voxel) for ray hits on outer wall faces
+        const distToPoly = GeoCoords.distanceToPolygon(worldX, worldZ, b.points);
+        if (distToPoly < minBuildingDist && distToPoly <= 2.5) {
+          minBuildingDist = distToPoly;
           targetBuilding = b;
         }
       }
@@ -333,8 +332,14 @@ export class SpatialFeatureStore {
       return null;
     }
 
-    const primaryPoi = nearbyPois.length > 0 ? nearbyPois[0] : null;
-    const title = targetBuilding.name || (primaryPoi ? `${primaryPoi.icon} ${primaryPoi.name}` : null) || (targetBuilding.amenity ? `${targetBuilding.amenity.toUpperCase()}` : null);
+    // Prioritize genuine building name, or address / building type.
+    // Do not overwrite building title with arbitrary POIs (like fountains or generic kiosks) unless it's a prominent named institution
+    const prominentPoi = nearbyPois.find(p => !p.name.includes('Заведение') && !p.name.includes('Фонтан') && (p.category === 'museum' || p.category === 'theatre' || p.category === 'university' || p.category === 'hotel' || p.category === 'hospital'));
+    const title = targetBuilding.name ||
+      (prominentPoi ? `${prominentPoi.icon} ${prominentPoi.name}` : null) ||
+      (targetBuilding.address ? `${targetBuilding.buildingType || 'Здание'} (${targetBuilding.address})` : null) ||
+      targetBuilding.buildingType ||
+      'Городское здание';
 
     return {
       name: title,

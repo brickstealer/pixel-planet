@@ -64,13 +64,15 @@ export class OsmParser {
   ): void {
     const isDesert = GeoCoords.isDesertRegion(anchorLat, anchorLon);
 
-    // Track relation member way IDs to avoid processing duplicate anonymous building polygons
+    // Track relation member way IDs only for building multipolygons to avoid skipping valid buildings/parts
     const relationMemberWayIds = new Set<string | number>();
     for (const elem of elements) {
-      if (elem.type === 'relation' && elem.members) {
-        for (const m of elem.members) {
-          if (m.type === 'way' && m.ref) {
-            relationMemberWayIds.add(m.ref);
+      if (elem.type === 'relation' && elem.tags && elem.tags.type === 'multipolygon' && (elem.tags.building || elem.tags['building:part'])) {
+        if (elem.members) {
+          for (const m of elem.members) {
+            if (m.role === 'outer' && m.type === 'way' && m.ref) {
+              relationMemberWayIds.add(m.ref);
+            }
           }
         }
       }
@@ -79,9 +81,9 @@ export class OsmParser {
     for (const elem of elements) {
       const tags = elem.tags || {};
 
-      // If this way is already part of a building relation and lacks unique landmark tags, skip duplicate outline
+      // If this way is already part of a building multipolygon and lacks unique attributes, skip duplicate outline
       if (elem.type === 'way' && relationMemberWayIds.has(elem.id)) {
-        const hasUniqueLandmark = tags.historic || tags.tourism || tags.amenity || tags['name:ru'] || tags.name;
+        const hasUniqueLandmark = tags.historic || tags.tourism || tags.amenity || tags['name:ru'] || tags.name || tags['building:levels'] || tags.height;
         if (!hasUniqueLandmark) {
           continue;
         }
@@ -113,6 +115,7 @@ export class OsmParser {
 
           let icon = '📍';
           let category = tags.amenity || tags.shop || tags.tourism || tags.historic || 'poi';
+          const isPlaque = tags.memorial === 'plaque' || tags.historic === 'memorial_plaque';
           if (isSubway) {
             icon = '🚇';
             category = 'subway';
@@ -125,10 +128,24 @@ export class OsmParser {
           else if (tags.shop === 'supermarket' || tags.shop === 'convenience') icon = '🛒';
           else if (tags.shop === 'clothes') icon = '👗';
           else if (tags.tourism === 'hotel') icon = '🏨';
-          else if (tags.historic === 'monument' || tags.historic === 'memorial') icon = '🗿';
-          else if (tags.tourism === 'viewpoint') icon = '🔭';
+          else if (isPlaque) {
+            icon = '📜';
+            category = 'plaque';
+          } else if (tags.historic === 'monument' || tags.historic === 'memorial') {
+            icon = '🗿';
+            category = 'monument';
+          } else if (tags.amenity === 'fountain') {
+            icon = '⛲';
+            category = 'fountain';
+          } else if (tags.tourism === 'viewpoint') icon = '🔭';
 
-          const poiName = tags['name:ru'] || tags.name || tags['name:en'] || (isSubway ? 'Вход в метро' : 'Заведение');
+          let defaultName = 'Заведение';
+          if (isSubway) defaultName = 'Вход в метро';
+          else if (isPlaque) defaultName = 'Мемориальная доска';
+          else if (tags.historic === 'monument') defaultName = 'Памятник';
+          else if (tags.amenity === 'fountain') defaultName = 'Фонтан';
+
+          const poiName = tags['name:ru'] || tags.name || tags['name:en'] || defaultName;
           const poiFeat: OsmPoi = {
             id: elem.id,
             type: 'poi',
@@ -197,13 +214,13 @@ export class OsmParser {
         continue;
       }
 
-      // Gather outer geometry rings for both ways and relation multipolygons
+      // Gather outer and part geometry rings for both ways and relations
       const geometryList: { lat: number; lon: number }[][] = [];
       if (elem.type === 'way' && elem.geometry && elem.geometry.length >= 2) {
         geometryList.push(elem.geometry);
       } else if (elem.type === 'relation' && elem.members) {
         for (const m of elem.members) {
-          if (m.role === 'outer' && m.geometry && m.geometry.length >= 2) {
+          if ((m.role === 'outer' || m.role === 'part') && m.geometry && m.geometry.length >= 2) {
             geometryList.push(m.geometry);
           }
         }
@@ -398,14 +415,37 @@ export class OsmParser {
             tags.man_made === 'silo' ||
             tags.man_made === 'storage_tank';
 
+          let buildingName = tags['name:ru'] || tags.name || tags['name:en'] || null;
+          if (!buildingName && tags.wikipedia) {
+            const match = tags.wikipedia.match(/^ru:(.+)$/);
+            if (match) {
+              try {
+                buildingName = decodeURIComponent(match[1].replace(/_/g, ' '));
+              } catch {
+                buildingName = match[1].replace(/_/g, ' ');
+              }
+            }
+          }
+
+          let displayBuildingType = 'здание';
+          const rawType = tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание');
+          if (rawType === 'apartments' || rawType === 'residential') displayBuildingType = 'Жилой дом';
+          else if (rawType === 'university' || rawType === 'college') displayBuildingType = 'Университетский корпус';
+          else if (rawType === 'school') displayBuildingType = 'Школа / Гимназия';
+          else if (rawType === 'civic' || rawType === 'public') displayBuildingType = 'Общественное / административное здание';
+          else if (rawType === 'hospital' || rawType === 'clinic') displayBuildingType = 'Медицинский корпус';
+          else if (rawType === 'commercial' || rawType === 'office') displayBuildingType = 'Офисно-деловой центр';
+          else if (rawType === 'hotel') displayBuildingType = 'Отель / Гостиница';
+          else if (rawType !== 'yes') displayBuildingType = rawType;
+
           const feature: OsmBuilding = {
             id: elem.id,
-            name: tags['name:ru'] || tags.name || tags['name:en'] || null,
+            name: buildingName,
             address: fullAddress,
             city: city,
             levels: (isEiffelTower || isTower || isPyramid || isCathedral || isChimney || isRuins) ? (isRuins ? 1 : 2) : levels,
             height: isEiffelTower ? 330 : Math.round(heightMeters),
-            buildingType: isPyramid ? 'Древняя пирамида' : (isRuins ? 'Археологические руины' : (isSaintBasils ? 'Храм Василия Блаженного (Покровский собор)' : (isEiffelTower ? 'Эйфелева башня (ажурная металлическая башня)' : (isCathedral ? 'Православный собор / храм' : (isTower ? 'Теле-/радиобашня' : (isChimney ? 'Промышленная дымовая труба' : (tags.building !== 'yes' ? tags.building : (tags.amenity || tags.shop || tags.office || 'здание')))))))),
+            buildingType: isPyramid ? 'Древняя пирамида' : (isRuins ? 'Археологические руины' : (isSaintBasils ? 'Храм Василия Блаженного (Покровский собор)' : (isEiffelTower ? 'Эйфелева башня (ажурная металлическая башня)' : (isCathedral ? 'Православный собор / храм' : (isTower ? 'Теле-/радиобашня' : (isChimney ? 'Промышленная дымовая труба' : displayBuildingType)))))),
             amenity: tags.amenity || tags.shop || tags.tourism || null,
             type: 'building',
             isPyramid,

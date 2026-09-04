@@ -55,4 +55,26 @@ export class GeoCoords {
     }
     return false;
   }
+
+  /**
+   * Calculates the minimum Euclidean distance from a point (x, z) to the perimeter segments of a polygon
+   */
+  static distanceToPolygon(x: number, z: number, poly: [number, number][]): number {
+    if (!poly || poly.length === 0) return Infinity;
+    let minDist = Infinity;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const x1 = poly[j][0], z1 = poly[j][1];
+      const x2 = poly[i][0], z2 = poly[i][1];
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const lenSq = dx * dx + dz * dz;
+      let t = lenSq === 0 ? 0 : ((x - x1) * dx + (z - z1) * dz) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const projX = x1 + t * dx;
+      const projZ = z1 + t * dz;
+      const d = Math.hypot(x - projX, z - projZ);
+      if (d < minDist) minDist = d;
+    }
+    return minDist;
+  }
 }

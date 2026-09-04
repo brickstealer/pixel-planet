@@ -52,7 +52,12 @@ export class InspectionController {
       const hit = intersects[0];
       const hitPoint = hit.point;
 
-      if (hitPoint.y > 19.5) {
+      // Flat ground/sidewalk surface is at y = (groundY + 1) * VOXEL_SIZE = 42.0m.
+      // Elevated structures (buildings, trees, monuments, mountains) have y > 42.1m.
+      const isElevated = hitPoint.y > 42.1;
+      const isUnloaded = !this.osmProvider.isPointInLoadedSector(hitPoint.x, hitPoint.z);
+
+      if (isElevated || isUnloaded) {
         const info = this.osmProvider.getFeatureAtPoint(hitPoint.x, hitPoint.z);
 
         if (info) {

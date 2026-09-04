@@ -575,8 +575,9 @@ export class OsmVoxelRasterizer {
       const cat = (poi.category || '').toLowerCase();
       const name = (poi.name || '').toLowerCase();
 
-      // Monument / Statue
-      if (cat.includes('monument') || cat.includes('memorial') || cat.includes('statue') || cat.includes('artwork') || name.includes('памятник') || name.includes('монумент') || name.includes('обелиск')) {
+      // Monument / Statue (exclude wall plaques)
+      const isPlaque = cat.includes('plaque') || name.includes('доска');
+      if (!isPlaque && (cat.includes('monument') || cat.includes('memorial') || cat.includes('statue') || cat.includes('artwork') || name.includes('памятник') || name.includes('монумент') || name.includes('обелиск'))) {
         for (let ox = -1; ox <= 1; ox++) {
           for (let oz = -1; oz <= 1; oz++) {
             setBlock(lx + ox, groundY + 1, lz + oz, BlockType.STONE);
