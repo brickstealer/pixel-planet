@@ -8,27 +8,57 @@ import {
 } from './VoxelTypes.js';
 import { VoxelMesher } from './VoxelMesher.js';
 
+export interface ActiveChunk {
+  cx: number;
+  cz: number;
+  voxels: Uint8Array;
+  mesh: THREE.Mesh | null;
+  usedOsm: boolean;
+}
+
+export interface BuildQueueTask {
+  cx: number;
+  cz: number;
+  key: string;
+  priority: number;
+}
+
+export interface ITerrainGenerator {
+  generateChunk(chunkX: number, chunkZ: number): Uint8Array;
+}
+
+export interface IOsmProvider {
+  populateChunk(chunkX: number, chunkZ: number, voxels: Uint8Array): boolean;
+  isPointInLoadedSector(worldX: number, worldZ: number): boolean;
+  checkStreaming(playerWorldX: number, playerWorldZ: number, renderDistChunks?: number): void;
+}
+
 export class ChunkManager {
-  constructor(scene, terrainGen, osmProvider, material) {
+  scene: THREE.Scene;
+  terrainGen: ITerrainGenerator;
+  osmProvider: IOsmProvider | null;
+  material: THREE.Material;
+
+  renderDistance: number = 10;
+  activeChunks: Map<string, ActiveChunk> = new Map();
+  buildQueue: BuildQueueTask[] = [];
+  lastPlayerChunk: { cx: number | null; cz: number | null } = { cx: null, cz: null };
+
+  maxChunksPerFrame: number = 6;
+  totalVoxelsRendered: number = 0;
+
+  constructor(scene: THREE.Scene, terrainGen: ITerrainGenerator, osmProvider: IOsmProvider | null, material: THREE.Material) {
     this.scene = scene;
     this.terrainGen = terrainGen;
     this.osmProvider = osmProvider;
     this.material = material;
-
-    this.renderDistance = 10; // Chunks radius (default 10, configurable up to 100)
-    this.activeChunks = new Map(); // key -> { cx, cz, mesh, voxels, usedOsm }
-    this.buildQueue = []; // Chunks queued to be built
-    this.lastPlayerChunk = { cx: null, cz: null };
-
-    this.maxChunksPerFrame = 6; // Base chunks built per frame
-    this.totalVoxelsRendered = 0;
   }
 
   /**
    * Clears all active chunks and queues (e.g. when teleporting)
    */
-  clearAll() {
-    for (const [key, chunk] of this.activeChunks.entries()) {
+  clearAll(): void {
+    for (const [, chunk] of this.activeChunks.entries()) {
       if (chunk.mesh) {
         this.scene.remove(chunk.mesh);
         chunk.mesh.geometry.dispose();
@@ -42,7 +72,7 @@ export class ChunkManager {
   /**
    * Updates streaming chunks based on player camera position
    */
-  update(cameraPosition, cameraDirection) {
+  update(cameraPosition: THREE.Vector3, cameraDirection?: THREE.Vector3): void {
     const playerCX = Math.floor(cameraPosition.x / (CHUNK_SIZE_X * VOXEL_SIZE));
     const playerCZ = Math.floor(cameraPosition.z / (CHUNK_SIZE_Z * VOXEL_SIZE));
 
@@ -61,10 +91,10 @@ export class ChunkManager {
     this.processQueue();
   }
 
-  updateActiveChunks(playerCX, playerCZ, cameraDirection) {
+  updateActiveChunks(playerCX: number, playerCZ: number, cameraDirection?: THREE.Vector3): void {
     const R = this.renderDistance;
-    const requiredKeys = new Set();
-    const newChunks = [];
+    const requiredKeys = new Set<string>();
+    const newChunks: BuildQueueTask[] = [];
 
     // Direction vector for front-bias prioritizing chunks in flight path
     const dirX = cameraDirection ? cameraDirection.x : 0;
@@ -122,13 +152,14 @@ export class ChunkManager {
     }
   }
 
-  processQueue() {
+  processQueue(): void {
     let buildsThisFrame = 0;
     // Adaptive build budget: scale up if queue is large for high render distances
     const batchLimit = Math.min(24, Math.max(this.maxChunksPerFrame, Math.floor(this.buildQueue.length / 25)));
 
     while (this.buildQueue.length > 0 && buildsThisFrame < batchLimit) {
       const task = this.buildQueue.shift();
+      if (!task) break;
       if (this.activeChunks.has(task.key)) continue;
 
       try {
@@ -140,7 +171,7 @@ export class ChunkManager {
     }
   }
 
-  generateAndBuildChunk(cx, cz, key) {
+  generateAndBuildChunk(cx: number, cz: number, key: string): void {
     const voxels = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
 
     // Try populating with real OSM structures anywhere on Earth!
@@ -190,7 +221,7 @@ export class ChunkManager {
     // Build optimized 3D geometry
     const geometry = VoxelMesher.buildMesh(voxels);
 
-    let mesh = null;
+    let mesh: THREE.Mesh | null = null;
     if (geometry) {
       mesh = new THREE.Mesh(geometry, this.material);
       mesh.position.set(
@@ -217,12 +248,12 @@ export class ChunkManager {
   /**
    * Rebuilds chunks when newly streamed OSM data arrives
    */
-  refreshNonOsmChunks() {
+  refreshNonOsmChunks(): void {
     for (const [key, chunk] of this.activeChunks.entries()) {
       if (!chunk.usedOsm) {
         const testVoxels = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
         try {
-          if (this.osmProvider.populateChunk(chunk.cx, chunk.cz, testVoxels)) {
+          if (this.osmProvider && this.osmProvider.populateChunk(chunk.cx, chunk.cz, testVoxels)) {
             // Real OSM data has arrived for this chunk! Rebuild mesh
             if (chunk.mesh) {
               this.scene.remove(chunk.mesh);
@@ -251,7 +282,7 @@ export class ChunkManager {
     }
   }
 
-  getChunkCount() {
+  getChunkCount(): number {
     return this.activeChunks.size;
   }
 }

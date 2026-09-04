@@ -3,34 +3,34 @@ export const CHUNK_SIZE_Z = 16;
 export const CHUNK_SIZE_Y = 180; // Up to 360 meters tall for real skyscrapers and Eiffel Tower
 export const VOXEL_SIZE = 2.0; // 1 voxel = 2.0 meters
 
-export const BlockType = {
-  AIR: 0,
-  GRASS: 1,
-  DIRT: 2,
-  STONE: 3,
-  WATER: 4,
-  SAND: 5,
-  ROAD: 6,
-  SIDEWALK: 7,
-  BUILDING_BRICK: 8,
-  BUILDING_CONCRETE: 9,
-  BUILDING_GLASS: 10,
-  BUILDING_ROOF: 11,
-  WINDOW_LIT: 12,
-  WINDOW_DARK: 13,
-  TREE_TRUNK: 14,
-  TREE_LEAVES: 15,
-  SNOW: 16,
-  METAL: 17,
-  ROAD_MARKING: 18,
-  MONUMENT_BRONZE: 19,
-  GOLD: 20,
-  WARNING_YELLOW: 21,
-  WARNING_BLACK: 22,
-};
+export enum BlockType {
+  AIR = 0,
+  GRASS = 1,
+  DIRT = 2,
+  STONE = 3,
+  WATER = 4,
+  SAND = 5,
+  ROAD = 6,
+  SIDEWALK = 7,
+  BUILDING_BRICK = 8,
+  BUILDING_CONCRETE = 9,
+  BUILDING_GLASS = 10,
+  BUILDING_ROOF = 11,
+  WINDOW_LIT = 12,
+  WINDOW_DARK = 13,
+  TREE_TRUNK = 14,
+  TREE_LEAVES = 15,
+  SNOW = 16,
+  METAL = 17,
+  ROAD_MARKING = 18,
+  MONUMENT_BRONZE = 19,
+  GOLD = 20,
+  WARNING_YELLOW = 21,
+  WARNING_BLACK = 22
+}
 
 // RGB Colors in [0..1] range for vertex colors
-export const BlockPalette = {
+export const BlockPalette: Record<BlockType, [number, number, number]> = {
   [BlockType.AIR]: [0, 0, 0],
   [BlockType.GRASS]: [0.28, 0.58, 0.22],
   [BlockType.DIRT]: [0.45, 0.32, 0.18],
@@ -53,10 +53,10 @@ export const BlockPalette = {
   [BlockType.MONUMENT_BRONZE]: [0.62, 0.46, 0.28],
   [BlockType.GOLD]: [0.95, 0.78, 0.24],
   [BlockType.WARNING_YELLOW]: [0.98, 0.80, 0.08], // Bright industrial warning yellow
-  [BlockType.WARNING_BLACK]: [0.10, 0.10, 0.12],  // Industrial hazard black
+  [BlockType.WARNING_BLACK]: [0.10, 0.10, 0.12]  // Industrial hazard black
 };
 
 // Return whether block is transparent/non-solid to neighbor face culling
-export function isBlockTransparent(type) {
+export function isBlockTransparent(type: BlockType): boolean {
   return type === BlockType.AIR || type === BlockType.WATER;
 }

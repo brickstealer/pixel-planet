@@ -1,42 +1,53 @@
 import * as THREE from 'three';
 
+export interface FlightKeys {
+  forward: boolean;
+  backward: boolean;
+  left: boolean;
+  right: boolean;
+  up: boolean;
+  down: boolean;
+  boost: boolean;
+}
+
 export class FlightControls {
-  constructor(camera, domElement) {
+  camera: THREE.Camera;
+  domElement: HTMLElement;
+
+  isLocked: boolean = false;
+  cruiseSpeed: number = 35.0;
+  boostMultiplier: number = 4.0;
+  currentSpeed: number = 35.0;
+
+  velocity: THREE.Vector3 = new THREE.Vector3();
+  direction: THREE.Vector3 = new THREE.Vector3();
+
+  yaw: number = 0;
+  pitch: number = -0.15; // slightly looking down at city
+
+  keys: FlightKeys = {
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+    up: false,
+    down: false,
+    boost: false
+  };
+
+  hasStarted: boolean = false;
+
+  constructor(camera: THREE.Camera, domElement: HTMLElement) {
     this.camera = camera;
     this.domElement = domElement;
-
-    this.isLocked = false;
-
-    // Movement speeds in m/s
-    this.cruiseSpeed = 35.0;
-    this.boostMultiplier = 4.0;
-    this.currentSpeed = this.cruiseSpeed;
-
-    this.velocity = new THREE.Vector3();
-    this.direction = new THREE.Vector3();
-
-    // Camera angles
-    this.yaw = 0;
-    this.pitch = -0.15; // slightly looking down at city
-
-    this.keys = {
-      forward: false,
-      backward: false,
-      left: false,
-      right: false,
-      up: false,
-      down: false,
-      boost: false
-    };
-
-    this.hasStarted = false;
     this.initListeners();
   }
 
-  initListeners() {
+  initListeners(): void {
     this.domElement.addEventListener('click', () => {
       // Don't capture if user was clicking an input or button
-      if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'BUTTON')) {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'BUTTON' || active.tagName === 'TEXTAREA')) {
         return;
       }
       if (!this.isLocked) {
@@ -65,7 +76,7 @@ export class FlightControls {
       }
     });
 
-    document.addEventListener('mousemove', (e) => {
+    document.addEventListener('mousemove', (e: MouseEvent) => {
       if (!this.isLocked) return;
 
       const sensitivity = 0.0022;
@@ -77,15 +88,16 @@ export class FlightControls {
       this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch));
     });
 
-    window.addEventListener('keydown', (e) => {
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
       // If user is typing in search input, completely ignore flight keys!
-      const isInputActive = document.activeElement &&
-        (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+      const active = document.activeElement;
+      const isInputActive = active &&
+        (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
 
       // Quick hotkey to open city search: "/" or "Enter" when not already typing
       if (!isInputActive && (e.code === 'Slash' || e.code === 'Enter')) {
         e.preventDefault();
-        const searchInput = document.getElementById('search-input');
+        const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
         if (searchInput) {
           if (document.pointerLockElement) {
             document.exitPointerLock();
@@ -97,9 +109,8 @@ export class FlightControls {
       }
 
       if (isInputActive) {
-        // ESC inside search input blurs it
         if (e.code === 'Escape') {
-          document.activeElement.blur();
+          (active as HTMLElement).blur();
         }
         return;
       }
@@ -121,9 +132,10 @@ export class FlightControls {
       }
     });
 
-    window.addEventListener('keyup', (e) => {
-      const isInputActive = document.activeElement &&
-        (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+    window.addEventListener('keyup', (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      const isInputActive = active &&
+        (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
       if (isInputActive) return;
 
       switch (e.code) {
@@ -138,7 +150,7 @@ export class FlightControls {
     });
 
     // Wheel to adjust cruise speed
-    window.addEventListener('wheel', (e) => {
+    window.addEventListener('wheel', (e: WheelEvent) => {
       if (!this.isLocked) return;
       if (e.deltaY < 0) {
         this.cruiseSpeed = Math.min(250, this.cruiseSpeed + 10);
@@ -148,7 +160,7 @@ export class FlightControls {
     });
   }
 
-  update(delta) {
+  update(delta: number): void {
     // 1. Update Camera Rotation using Euler angles (YXZ order)
     const euler = new THREE.Euler(0, 0, 0, 'YXZ');
     euler.x = this.pitch;
@@ -192,24 +204,24 @@ export class FlightControls {
     if (this.camera.position.y < 10) this.camera.position.y = 10;
   }
 
-  getSpeedKmh() {
+  getSpeedKmh(): number {
     return Math.round(this.velocity.length() * 3.6);
   }
 
-  getLookDirection() {
+  getLookDirection(): THREE.Vector3 {
     const dir = new THREE.Vector3();
     this.camera.getWorldDirection(dir);
     return dir;
   }
 
-  setLookAngles(yaw, pitch) {
+  setLookAngles(yaw: number, pitch: number): void {
     this.yaw = yaw;
     this.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, pitch));
     const euler = new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ');
     this.camera.quaternion.setFromEuler(euler);
   }
 
-  resetVelocity() {
+  resetVelocity(): void {
     this.velocity.set(0, 0, 0);
   }
 }

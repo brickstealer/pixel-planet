@@ -3,13 +3,17 @@
  * Allows storing gigabytes of city features locally with 0ms network latency on reload.
  */
 export class OsmCache {
-  constructor(dbName = 'PixelPlanetOsmCache', storeName = 'osm_sectors_v1') {
+  dbName: string;
+  storeName: string;
+  dbPromise: Promise<IDBDatabase | null>;
+
+  constructor(dbName: string = 'PixelPlanetOsmCache_v3', storeName: string = 'osm_sectors_v3') {
     this.dbName = dbName;
     this.storeName = storeName;
     this.dbPromise = this.initDB();
   }
 
-  initDB() {
+  private initDB(): Promise<IDBDatabase | null> {
     return new Promise((resolve) => {
       if (typeof window === 'undefined' || !('indexedDB' in window)) {
         resolve(null);
@@ -18,12 +22,12 @@ export class OsmCache {
       try {
         const req = window.indexedDB.open(this.dbName, 1);
         req.onupgradeneeded = (e) => {
-          const db = e.target.result;
+          const db = (e.target as IDBOpenDBRequest).result;
           if (!db.objectStoreNames.contains(this.storeName)) {
             db.createObjectStore(this.storeName, { keyPath: 'key' });
           }
         };
-        req.onsuccess = (e) => resolve(e.target.result);
+        req.onsuccess = (e) => resolve((e.target as IDBOpenDBRequest).result);
         req.onerror = (e) => {
           console.warn('IndexedDB unavailable, proceeding without cache:', e);
           resolve(null);
@@ -35,7 +39,7 @@ export class OsmCache {
     });
   }
 
-  async get(key) {
+  async get<T = any>(key: string): Promise<T | null> {
     const db = await this.dbPromise;
     if (!db) return null;
 
@@ -46,19 +50,19 @@ export class OsmCache {
         const req = store.get(key);
         req.onsuccess = () => {
           if (req.result && req.result.data) {
-            resolve(req.result.data);
+            resolve(req.result.data as T);
           } else {
             resolve(null);
           }
         };
         req.onerror = () => resolve(null);
-      } catch (err) {
+      } catch {
         resolve(null);
       }
     });
   }
 
-  async set(key, data) {
+  async set(key: string, data: any): Promise<void> {
     const db = await this.dbPromise;
     if (!db) return;
 
@@ -73,13 +77,13 @@ export class OsmCache {
         });
         tx.oncomplete = () => resolve();
         tx.onerror = () => resolve();
-      } catch (err) {
+      } catch {
         resolve();
       }
     });
   }
 
-  async clear() {
+  async clear(): Promise<void> {
     const db = await this.dbPromise;
     if (!db) return;
 
@@ -90,7 +94,7 @@ export class OsmCache {
         store.clear();
         tx.oncomplete = () => resolve();
         tx.onerror = () => resolve();
-      } catch (err) {
+      } catch {
         resolve();
       }
     });

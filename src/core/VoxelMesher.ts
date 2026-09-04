@@ -9,59 +9,92 @@ import {
   isBlockTransparent
 } from './VoxelTypes.js';
 
-// Direction vectors for 6 faces: [dx, dy, dz, normalX, normalY, normalZ, lightFactor]
-const FACES = [
+interface FaceDef {
+  dir: [number, number, number];
+  norm: [number, number, number];
+  light: number;
+  corners: [number, number, number][];
+}
+
+const FACES: FaceDef[] = [
   // 0: +X (Right)
-  { dir: [ 1,  0,  0], norm: [ 1,  0,  0], light: 0.75,
+  {
+    dir: [1, 0, 0],
+    norm: [1, 0, 0],
+    light: 0.75,
     corners: [
       [1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]
     ]
   },
   // 1: -X (Left)
-  { dir: [-1,  0,  0], norm: [-1,  0,  0], light: 0.70,
+  {
+    dir: [-1, 0, 0],
+    norm: [-1, 0, 0],
+    light: 0.70,
     corners: [
       [0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]
     ]
   },
   // 2: +Y (Top / Sky)
-  { dir: [ 0,  1,  0], norm: [ 0,  1,  0], light: 1.00,
+  {
+    dir: [0, 1, 0],
+    norm: [0, 1, 0],
+    light: 1.00,
     corners: [
       [0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]
     ]
   },
   // 3: -Y (Bottom / Ground)
-  { dir: [ 0, -1,  0], norm: [ 0, -1,  0], light: 0.50,
+  {
+    dir: [0, -1, 0],
+    norm: [0, -1, 0],
+    light: 0.50,
     corners: [
       [0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]
     ]
   },
   // 4: +Z (Front)
-  { dir: [ 0,  0,  1], norm: [ 0,  0,  1], light: 0.85,
+  {
+    dir: [0, 0, 1],
+    norm: [0, 0, 1],
+    light: 0.85,
     corners: [
       [1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]
     ]
   },
   // 5: -Z (Back)
-  { dir: [ 0,  0, -1], norm: [ 0,  0, -1], light: 0.80,
+  {
+    dir: [0, 0, -1],
+    norm: [0, 0, -1],
+    light: 0.80,
     corners: [
       [0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]
     ]
   }
 ];
 
+export interface NeighborChunkProvider {
+  getBlock(x: number, y: number, z: number): BlockType;
+}
+
+export interface NeighborChunks {
+  posX?: NeighborChunkProvider;
+  negX?: NeighborChunkProvider;
+  posZ?: NeighborChunkProvider;
+  negZ?: NeighborChunkProvider;
+}
+
 export class VoxelMesher {
   /**
    * Builds an optimized Three.js BufferGeometry from a 3D voxel array
-   * @param {Uint8Array} voxels - 1D array of length CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z
-   * @param {Object} neighborChunks - Optional { posX, negX, posZ, negZ } for seamless chunk borders
    */
-  static buildMesh(voxels, neighborChunks = {}) {
-    const positions = [];
-    const normals = [];
-    const colors = [];
-    const emissives = [];
+  static buildMesh(voxels: Uint8Array, neighborChunks: NeighborChunks = {}): THREE.BufferGeometry | null {
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const colors: number[] = [];
+    const emissives: number[] = [];
 
-    const getBlock = (x, y, z) => {
+    const getBlock = (x: number, y: number, z: number): BlockType => {
       if (y < 0 || y >= CHUNK_SIZE_Y) return BlockType.AIR;
 
       if (x < 0) {
@@ -90,22 +123,16 @@ export class VoxelMesher {
       }
 
       const idx = (y * CHUNK_SIZE_Z + z) * CHUNK_SIZE_X + x;
-      return voxels[idx];
+      return (voxels[idx] as BlockType) || BlockType.AIR;
     };
 
-    // Calculate Ambient Occlusion level (0..3) for a vertex
-    const calcAO = (s1, s2, corner) => {
-      if (s1 && s2) return 0.5; // full corner occlusion
-      const count = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (corner ? 1 : 0);
-      return [1.0, 0.82, 0.68, 0.52][count];
-    };
+    const triIndices = [0, 1, 2, 0, 2, 3];
 
-    // Pre-allocate arrays
     for (let y = 0; y < CHUNK_SIZE_Y; y++) {
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
         for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const idx = (y * CHUNK_SIZE_Z + z) * CHUNK_SIZE_X + x;
-          const block = voxels[idx];
+          const block = voxels[idx] as BlockType;
           if (block === BlockType.AIR) continue;
 
           const baseCol = BlockPalette[block] || [0.5, 0.5, 0.5];
@@ -137,19 +164,15 @@ export class VoxelMesher {
               (z + c[2]) * VOXEL_SIZE
             ]);
 
-            // Triangle 1: 0, 1, 2. Triangle 2: 0, 2, 3
-            const triIndices = [0, 1, 2, 0, 2, 3];
-
             for (let i = 0; i < 6; i++) {
               const cornerIdx = triIndices[i];
               const vert = quadVertices[cornerIdx];
               positions.push(vert[0], vert[1], vert[2]);
               normals.push(norm[0], norm[1], norm[2]);
 
-              // Ambient Occlusion approximation based on y level and corner
+              // Subtle vertical gradient on vertical walls
               let ao = 1.0;
               if (!isLitWindow && face.dir[1] === 0) {
-                // Subtle vertical gradient on vertical walls
                 ao = 0.88 + 0.12 * (cornerIdx === 1 || cornerIdx === 2 ? 1 : 0);
               }
 

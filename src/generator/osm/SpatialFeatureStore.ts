@@ -1,0 +1,350 @@
+import {
+  OsmFeature,
+  OsmBuilding,
+  OsmRoad,
+  OsmPoi,
+  OsmTree,
+  OsmPeak,
+  SubwayStation,
+  InspectedFeatureInfo,
+  SectorInfo
+} from './OsmTypes.js';
+import { GeoCoords } from './GeoCoords.js';
+
+export class SpatialFeatureStore {
+  private BUCKET_SIZE = 128;
+  spatialBuckets: Map<string, OsmFeature[]> = new Map();
+  features: OsmFeature[] = [];
+
+  clear(): void {
+    this.spatialBuckets.clear();
+    this.features = [];
+  }
+
+  addFeature(feature: OsmFeature): void {
+    if (feature.type === 'building') {
+      const b = feature as OsmBuilding;
+      if (b.isPyramid) {
+        const [pMinX, pMinZ, pMaxX, pMaxZ] = b.bounds;
+        const pad = 35;
+        // Purge any existing non-pyramid buildings whose bounds overlap this pyramid sanctuary
+        let purged = false;
+        this.features = this.features.filter(f => {
+          if (f.type === 'building' && !(f as OsmBuilding).isPyramid) {
+            const [fMinX, fMinZ, fMaxX, fMaxZ] = f.bounds;
+            const overlaps = (fMinX <= pMaxX + pad && fMaxX >= pMinX - pad && fMinZ <= pMaxZ + pad && fMaxZ >= pMinZ - pad);
+            if (overlaps) {
+              purged = true;
+              return false; // Remove overlapping building in pyramid sanctuary
+            }
+          }
+          return true;
+        });
+        if (purged) {
+          this.rebuildSpatialBuckets();
+        }
+      } else {
+        // If adding a non-pyramid building, check if it overlaps any known pyramid sanctuary
+        const [minX, minZ, maxX, maxZ] = b.bounds;
+        const pad = 35;
+        for (const f of this.features) {
+          if (f.type === 'building' && (f as OsmBuilding).isPyramid) {
+            const [pMinX, pMinZ, pMaxX, pMaxZ] = f.bounds;
+            const overlaps = (minX <= pMaxX + pad && maxX >= pMinX - pad && minZ <= pMaxZ + pad && maxZ >= pMinZ - pad);
+            if (overlaps) {
+              return; // Skip adding non-pyramid building in pyramid sanctuary!
+            }
+          }
+        }
+      }
+    }
+
+    const [minX, minZ, maxX, maxZ] = feature.bounds;
+
+    const bMinX = Math.floor(minX / this.BUCKET_SIZE);
+    const bMaxX = Math.floor(maxX / this.BUCKET_SIZE);
+    const bMinZ = Math.floor(minZ / this.BUCKET_SIZE);
+    const bMaxZ = Math.floor(maxZ / this.BUCKET_SIZE);
+
+    for (let bx = bMinX; bx <= bMaxX; bx++) {
+      for (let bz = bMinZ; bz <= bMaxZ; bz++) {
+        const key = `${bx},${bz}`;
+        let bucket = this.spatialBuckets.get(key);
+        if (!bucket) {
+          bucket = [];
+          this.spatialBuckets.set(key, bucket);
+        }
+        bucket.push(feature);
+      }
+    }
+    this.features.push(feature);
+  }
+
+  private rebuildSpatialBuckets(): void {
+    this.spatialBuckets.clear();
+    for (const feat of this.features) {
+      const [minX, minZ, maxX, maxZ] = feat.bounds;
+      const bMinX = Math.floor(minX / this.BUCKET_SIZE);
+      const bMaxX = Math.floor(maxX / this.BUCKET_SIZE);
+      const bMinZ = Math.floor(minZ / this.BUCKET_SIZE);
+      const bMaxZ = Math.floor(maxZ / this.BUCKET_SIZE);
+
+      for (let bx = bMinX; bx <= bMaxX; bx++) {
+        for (let bz = bMinZ; bz <= bMaxZ; bz++) {
+          const key = `${bx},${bz}`;
+          let bucket = this.spatialBuckets.get(key);
+          if (!bucket) {
+            bucket = [];
+            this.spatialBuckets.set(key, bucket);
+          }
+          bucket.push(feat);
+        }
+      }
+    }
+  }
+
+  getFeaturesInBounds(minX: number, minZ: number, maxX: number, maxZ: number): OsmFeature[] {
+    const bMinX = Math.floor(minX / this.BUCKET_SIZE);
+    const bMaxX = Math.floor(maxX / this.BUCKET_SIZE);
+    const bMinZ = Math.floor(minZ / this.BUCKET_SIZE);
+    const bMaxZ = Math.floor(maxZ / this.BUCKET_SIZE);
+
+    const candidates = new Set<OsmFeature>();
+
+    for (let bx = bMinX; bx <= bMaxX; bx++) {
+      for (let bz = bMinZ; bz <= bMaxZ; bz++) {
+        const bucket = this.spatialBuckets.get(`${bx},${bz}`);
+        if (bucket) {
+          for (const feat of bucket) {
+            candidates.add(feat);
+          }
+        }
+      }
+    }
+
+    return Array.from(candidates);
+  }
+
+  findNearestSubwayStation(worldX: number, worldZ: number, subwayStations: SubwayStation[], maxDist: number = 450): SubwayStation | null {
+    let nearest: SubwayStation | null = null;
+    let minDist = Infinity;
+    for (const st of subwayStations) {
+      const d = Math.hypot(worldX - st.x, worldZ - st.z);
+      if (d < minDist && d < maxDist) {
+        minDist = d;
+        nearest = st;
+      }
+    }
+    return nearest;
+  }
+
+  /**
+   * Find building/road/POI feature at world coordinates (worldX, worldZ) for HUD raycast inspection
+   */
+  getFeatureAtPoint(
+    worldX: number,
+    worldZ: number,
+    subwayStations: SubwayStation[],
+    isPointInLoadedSector: (x: number, z: number) => boolean,
+    getSectorInfo: (x: number, z: number) => SectorInfo
+  ): InspectedFeatureInfo | null {
+    const margin = 12.0;
+    const candidates = this.getFeaturesInBounds(worldX - margin, worldZ - margin, worldX + margin, worldZ + margin);
+
+    // 1. Look for building containing or closest to this point
+    let targetBuilding: OsmBuilding | null = null;
+    let minBuildingDist = Infinity;
+
+    for (const feat of candidates) {
+      if (feat.type === 'building') {
+        const b = feat as OsmBuilding;
+        if (GeoCoords.pointInPolygon(worldX, worldZ, b.points)) {
+          targetBuilding = b;
+          minBuildingDist = 0;
+          break;
+        }
+        const cx = (b.bounds[0] + b.bounds[2]) / 2;
+        const cz = (b.bounds[1] + b.bounds[3]) / 2;
+        const dist = Math.hypot(worldX - cx, worldZ - cz);
+        if (dist < minBuildingDist && dist < 26) {
+          minBuildingDist = dist;
+          targetBuilding = b;
+        }
+      }
+    }
+
+    // 2. Find nearest named road if building has no explicit address
+    let nearestStreetName: string | null = null;
+    let minRoadDist = Infinity;
+
+    for (const feat of candidates) {
+      if (feat.type === 'road') {
+        const r = feat as OsmRoad;
+        if (r.name) {
+          for (const pt of r.points) {
+            const d = Math.hypot(worldX - pt[0], worldZ - pt[1]);
+            if (d < minRoadDist) {
+              minRoadDist = d;
+              nearestStreetName = r.name;
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Find POIs inside or near this building / point
+    const nearbyPois: any[] = [];
+    for (const feat of candidates) {
+      if (feat.type === 'poi') {
+        const p = feat as OsmPoi;
+        const dist = Math.hypot(worldX - p.x, worldZ - p.z);
+        if (dist < 32) {
+          let poiTitle = p.name;
+
+          // Resolve Metro station name for subway entrances
+          if (p.isSubway) {
+            let stName = p.stationName;
+            if (!stName) {
+              const nearestSt = this.findNearestSubwayStation(p.x, p.z, subwayStations);
+              if (nearestSt) stName = nearestSt.name;
+            }
+            if (stName) {
+              poiTitle = `${stName} (${p.ref ? `Выход №${p.ref}` : 'Вход'})`;
+            }
+          }
+
+          nearbyPois.push({
+            name: poiTitle,
+            brand: p.brand,
+            category: p.category,
+            cuisine: p.cuisine,
+            openingHours: p.openingHours,
+            icon: p.icon,
+            isSubway: p.isSubway,
+            ref: p.ref,
+            x: p.x,
+            z: p.z
+          });
+        }
+      }
+    }
+
+    // If no building, check if aiming at a mountain peak, standalone monument, or subway entrance
+    if (!targetBuilding) {
+      const nearbyPeak = candidates.find(f => f.type === 'peak' && Math.hypot(worldX - (f as OsmPeak).x, worldZ - (f as OsmPeak).z) < (f as OsmPeak).radius) as OsmPeak | undefined;
+      if (nearbyPeak) {
+        return {
+          id: nearbyPeak.id,
+          name: nearbyPeak.isVolcano ? `🌋 ${nearbyPeak.name}` : `🏔️ ${nearbyPeak.name}`,
+          address: `Высота: ${nearbyPeak.ele} м над уровнем моря`,
+          city: null,
+          levels: 1,
+          height: nearbyPeak.ele,
+          buildingType: nearbyPeak.isVolcano ? 'Действующий стратовулкан' : 'Горная вершина',
+          pois: []
+        };
+      }
+
+      if (nearbyPois.length > 0) {
+        const p = nearbyPois[0];
+
+        // Specific handling for Subway Entrances
+        if (p.isSubway || p.category === 'subway' || (p.name && p.name.toLowerCase().includes('метро'))) {
+          let stationName = p.stationName;
+          let line = p.brand;
+          if (!stationName) {
+            const nearestSt = this.findNearestSubwayStation(p.x, p.z, subwayStations);
+            if (nearestSt) {
+              stationName = nearestSt.name;
+              if (!line) line = nearestSt.line;
+            }
+          }
+
+          const exitText = p.ref ? `Выход №${p.ref}` : (p.name && p.name.includes('Выход') ? p.name : 'Вход в метро');
+          const title = stationName ? `🚇 ${stationName}` : (p.name || '🚇 Станция метро');
+          const subtitle = stationName ? `${exitText}${line ? ` • ${line}` : ''}` : (nearestStreetName ? `ок. ${nearestStreetName}` : 'Вход в метро');
+
+          return {
+            name: title,
+            address: subtitle,
+            city: null,
+            levels: 1,
+            height: 4,
+            buildingType: 'Станция метро',
+            amenity: 'subway',
+            pois: nearbyPois
+          };
+        }
+
+        return {
+          name: `${p.icon} ${p.name}`,
+          address: nearestStreetName ? `ок. ${nearestStreetName}` : (p.openingHours ? `Часы: ${p.openingHours}` : null),
+          city: null,
+          levels: 1,
+          height: 4,
+          buildingType: p.category,
+          amenity: p.category,
+          pois: nearbyPois
+        };
+      }
+
+      // Check if aiming at a real tree from OSM
+      let targetTree: OsmTree | null = null;
+      let minTreeDist = Infinity;
+      for (const feat of candidates) {
+        if (feat.type === 'tree') {
+          const t = feat as OsmTree;
+          const d = Math.hypot(worldX - t.x, worldZ - t.z);
+          if (d < minTreeDist && d < 6.0) {
+            minTreeDist = d;
+            targetTree = t;
+          }
+        }
+      }
+
+      if (targetTree) {
+        return {
+          name: `🌳 ${targetTree.species}`,
+          address: nearestStreetName ? `ок. ${nearestStreetName}` : `Высота: ${Math.round(targetTree.height)} м`,
+          city: null,
+          levels: 1,
+          height: Math.round(targetTree.height),
+          buildingType: 'Дерево / Зеленые насаждения',
+          amenity: 'tree',
+          pois: []
+        };
+      }
+
+      // Check if aiming at an unloaded warning hazard sector
+      if (!isPointInLoadedSector(worldX, worldZ)) {
+        const info = getSectorInfo(worldX, worldZ);
+        return {
+          name: `⚠️ Сектор OSM [${info.sx}, ${info.sz}]`,
+          address: `${info.status} • GPS: ${info.targetLat.toFixed(4)}°, ${info.targetLon.toFixed(4)}°`,
+          city: null,
+          levels: 0,
+          height: 0,
+          buildingType: 'Гео-ресурс Overpass (600×600 м)',
+          amenity: 'warning',
+          pois: []
+        };
+      }
+
+      return null;
+    }
+
+    const primaryPoi = nearbyPois.length > 0 ? nearbyPois[0] : null;
+    const title = targetBuilding.name || (primaryPoi ? `${primaryPoi.icon} ${primaryPoi.name}` : null) || (targetBuilding.amenity ? `${targetBuilding.amenity.toUpperCase()}` : null);
+
+    return {
+      name: title,
+      address: targetBuilding.address || (nearestStreetName ? `ок. ${nearestStreetName}` : null),
+      city: targetBuilding.city,
+      levels: targetBuilding.levels,
+      height: targetBuilding.height,
+      buildingType: targetBuilding.buildingType,
+      amenity: targetBuilding.amenity,
+      pois: nearbyPois
+    };
+  }
+}
