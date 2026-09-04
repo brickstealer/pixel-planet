@@ -41,8 +41,39 @@ export class OsmDataProvider {
   lastCheckTime: number = 0;
   playerPos = { x: 0, z: 0 };
 
+  sectorSize: number = 600;
+  maxActiveFetches: number = 2;
+
   constructor() {
     this.client = new OverpassClient(this.cache);
+  }
+
+  setSectorSize(newSize: number): void {
+    if (this.sectorSize === newSize) return;
+    this.sectorSize = Math.max(100, Math.min(1500, newSize));
+    this.queuedSectors.clear();
+    this.requestQueue = [];
+    this.lastCheckPos = { x: 0, z: 0 };
+    this.lastCheckTime = 0;
+  }
+
+  setConcurrency(val: number): void {
+    this.maxActiveFetches = Math.max(1, Math.min(6, val));
+  }
+
+  reloadNearbySectors(playerWorldX: number, playerWorldZ: number): void {
+    this.fetchedSectors.clear();
+    this.queuedSectors.clear();
+    this.requestQueue = [];
+    this.store.clear();
+    this.lastCheckPos = { x: 0, z: 0 };
+    this.lastCheckTime = 0;
+    this.checkStreaming(playerWorldX, playerWorldZ, 20);
+  }
+
+  async clearCache(): Promise<void> {
+    await this.cache.clear();
+    this.reloadNearbySectors(this.playerPos.x, this.playerPos.z);
   }
 
   get features() {
@@ -94,16 +125,16 @@ export class OsmDataProvider {
     this.lastCheckTime = now;
     this.lastCheckPos = { x: playerWorldX, z: playerWorldZ };
 
-    const SECTOR_SIZE = 600;
+    const SECTOR_SIZE = this.sectorSize;
     const currentSectorX = Math.floor(playerWorldX / SECTOR_SIZE);
     const currentSectorZ = Math.floor(playerWorldZ / SECTOR_SIZE);
 
     const viewDistMeters = renderDistChunks * 32;
-    const sectorR = Math.min(3, Math.max(1, Math.ceil(viewDistMeters / SECTOR_SIZE)));
+    const sectorR = Math.min(16, Math.max(1, Math.ceil(viewDistMeters / SECTOR_SIZE)));
 
     this.requestQueue = this.requestQueue.filter(task => {
       const d = Math.hypot(task.worldX - playerWorldX, task.worldZ - playerWorldZ);
-      if (d > 2600) {
+      if (d > 3200) {
         this.queuedSectors.delete(task.sectorKey);
         return false;
       }
@@ -160,6 +191,13 @@ export class OsmDataProvider {
     this.isProcessingQueue = true;
 
     while (this.requestQueue.length > 0) {
+      // Limit concurrency to user configured maxActiveFetches
+      while (this.activeFetches.size >= this.maxActiveFetches) {
+        await new Promise(resolve => setTimeout(resolve, 80));
+      }
+
+      if (this.requestQueue.length === 0) break;
+
       this.requestQueue.sort((a, b) => {
         const distA = Math.hypot(a.worldX - this.playerPos.x, a.worldZ - this.playerPos.z);
         const distB = Math.hypot(b.worldX - this.playerPos.x, b.worldZ - this.playerPos.z);
@@ -169,11 +207,23 @@ export class OsmDataProvider {
       const task = this.requestQueue.shift();
       if (!task) break;
       this.queuedSectors.delete(task.sectorKey);
-      const res = await this.fetchSectorByWorld(task.worldX, task.worldZ, task.radiusMeters, task.sectorKey);
 
-      if (!res || !res.fromCache) {
-        await new Promise(resolve => setTimeout(resolve, 800));
-      }
+      // Launch worker
+      this.fetchSectorByWorld(task.worldX, task.worldZ, task.radiusMeters, task.sectorKey).then(async (res) => {
+        if (!res || !res.fromCache) {
+          await new Promise(resolve => setTimeout(resolve, 600));
+        }
+      }).catch(err => {
+        console.warn('Sector fetch error:', err);
+      });
+
+      // Small throttle between spawning concurrent workers
+      await new Promise(resolve => setTimeout(resolve, 120));
+    }
+
+    // Wait until in-flight workers finish
+    while (this.activeFetches.size > 0) {
+      await new Promise(resolve => setTimeout(resolve, 80));
     }
 
     this.isProcessingQueue = false;
@@ -230,7 +280,7 @@ export class OsmDataProvider {
   }
 
   isPointInLoadedSector(worldX: number, worldZ: number): boolean {
-    const SECTOR_SIZE = 600;
+    const SECTOR_SIZE = this.sectorSize;
     const sx = Math.floor(worldX / SECTOR_SIZE);
     const sz = Math.floor(worldZ / SECTOR_SIZE);
     return this.fetchedSectors.has(`${sx},${sz}`);
@@ -259,7 +309,7 @@ export class OsmDataProvider {
   }
 
   getSectorInfo(worldX: number, worldZ: number): SectorInfo {
-    const SECTOR_SIZE = 600;
+    const SECTOR_SIZE = this.sectorSize;
     const sx = Math.floor(worldX / SECTOR_SIZE);
     const sz = Math.floor(worldZ / SECTOR_SIZE);
     const key = `${sx},${sz}`;

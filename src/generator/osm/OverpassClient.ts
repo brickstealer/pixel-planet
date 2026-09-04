@@ -10,13 +10,21 @@ export class OverpassClient {
   private cache: OsmCache;
   private overpassMirrors = [
     'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter',
-    'https://overpass.private.coffee/api/interpreter',
+    'https://lz4.overpass-api.de/api/interpreter',
+    'https://z.overpass-api.de/api/interpreter',
     'https://overpass-api.de/api/interpreter'
   ];
 
   constructor(cache: OsmCache) {
     this.cache = cache;
+  }
+
+  private promoteMirror(successfulMirror: string): void {
+    const idx = this.overpassMirrors.indexOf(successfulMirror);
+    if (idx > 0) {
+      this.overpassMirrors.splice(idx, 1);
+      this.overpassMirrors.unshift(successfulMirror);
+    }
   }
 
   buildQuery(south: number, west: number, north: number, east: number): string {
@@ -57,27 +65,28 @@ export class OverpassClient {
   }
 
   async fetchSector(south: number, west: number, north: number, east: number): Promise<SectorFetchResult> {
-    const cacheKey = `osm_v5_${south.toFixed(4)}_${west.toFixed(4)}_${north.toFixed(4)}_${east.toFixed(4)}`;
+    const cacheKey = `osm_v7_${south.toFixed(4)}_${west.toFixed(4)}_${north.toFixed(4)}_${east.toFixed(4)}`;
 
     // 1. Check local IndexedDB disk cache
     const cachedData = await this.cache.get(cacheKey);
-    if (cachedData) {
+    if (cachedData && cachedData.elements && cachedData.elements.length > 0) {
       return { success: true, fromCache: true, data: cachedData };
     }
 
-    // 2. Query network mirror if not in cache (with 7.5s timeout per mirror)
+    // 2. Query network mirrors in priority order (with 7.5s timeout per mirror)
     const query = this.buildQuery(south, west, north, east);
+    let emptyResultData: any = null;
 
     for (const mirror of this.overpassMirrors) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 7500);
+      const startTime = Date.now();
 
       try {
         const res = await fetch(mirror, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'PixelPlanet3D/1.0 (tester@pixelplanet.local)'
+            'Content-Type': 'application/x-www-form-urlencoded'
           },
           body: 'data=' + encodeURIComponent(query),
           signal: controller.signal
@@ -86,12 +95,29 @@ export class OverpassClient {
 
         if (res.ok) {
           const data = await res.json();
-          await this.cache.set(cacheKey, data);
-          return { success: true, fromCache: false, data };
+          const count = data.elements ? data.elements.length : 0;
+          if (count > 0) {
+            // Only cache verified non-empty datasets
+            await this.cache.set(cacheKey, data);
+            this.promoteMirror(mirror);
+            const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+            console.log(`[Overpass] Sector loaded via ${new URL(mirror).hostname} (${count} features, ${duration}s)`);
+            return { success: true, fromCache: false, data };
+          } else {
+            console.warn(`[Overpass] Mirror ${new URL(mirror).hostname} returned 0 elements, trying fallback mirror...`);
+            emptyResultData = data;
+          }
+        } else {
+          console.warn(`[Overpass] Mirror ${new URL(mirror).hostname} responded with HTTP ${res.status}, trying next...`);
         }
-      } catch {
+      } catch (err: any) {
         clearTimeout(timeoutId);
+        console.warn(`[Overpass] Mirror ${new URL(mirror).hostname} error (${err?.name || 'Error'}), trying next...`);
       }
+    }
+
+    if (emptyResultData) {
+      return { success: true, fromCache: false, data: emptyResultData };
     }
 
     return { success: false, fromCache: false };

@@ -7,10 +7,21 @@ import { TimeOfDayMode } from '../rendering/AtmosphereManager.js';
 
 import { OsmDataProvider } from '../generator/osm/OsmDataProvider.js';
 
+export interface AdvancedStreamSettings {
+  sectorSize: number;
+  concurrency: number;
+  chunksPerFrame: number;
+}
+
 export interface HudCallbacks {
   onSearch: (query: string) => Promise<void>;
   onTimeChange: (mode: TimeOfDayMode) => void;
   onRenderDistanceChange: (val: number) => void;
+  onSectorSizeChange?: (size: number) => void;
+  onConcurrencyChange?: (concurrency: number) => void;
+  onChunksPerFrameChange?: (batch: number) => void;
+  onReloadSectors?: () => void;
+  onClearCache?: () => Promise<void>;
 }
 
 export class HudManager {
@@ -32,12 +43,37 @@ export class HudManager {
   searchForm = document.getElementById('search-form');
   searchInput = document.getElementById('search-input') as HTMLInputElement | null;
 
+  // Advanced settings panel elements
+  advSettingsModal = document.getElementById('adv-settings-modal');
+  advSettingsBtn = document.getElementById('adv-settings-btn');
+  openSettingsFullBtn = document.getElementById('open-settings-full-btn');
+  closeAdvSettingsBtn = document.getElementById('close-adv-settings-btn');
+
+  presetButtons = document.querySelectorAll('.adv-preset-btn');
+  sectorSizeButtons = document.querySelectorAll('#sector-size-options .adv-chip-btn');
+  concurrencyButtons = document.querySelectorAll('#concurrency-options .adv-chip-btn');
+  chunksBatchSlider = document.getElementById('chunks-batch-slider') as HTMLInputElement | null;
+
+  sectorSizeVal = document.getElementById('sector-size-val');
+  concurrencyVal = document.getElementById('concurrency-val');
+  chunksBatchVal = document.getElementById('chunks-batch-val');
+  advReloadBtn = document.getElementById('adv-reload-sectors-btn');
+  advClearCacheBtn = document.getElementById('adv-clear-cache-btn');
+
+  currentSettings: AdvancedStreamSettings = {
+    sectorSize: 600,
+    concurrency: 2,
+    chunksPerFrame: 6
+  };
+
   hudUpdateTimer: number = 0;
   private statusOverride: string | null = null;
   private statusOverrideTimer: number = 0;
 
   constructor(callbacks: HudCallbacks) {
+    this.loadSettingsFromStorage();
     this.initListeners(callbacks);
+    this.applySettingsUI(this.currentSettings);
   }
 
   updateStatus(msg: string, timeoutSeconds: number = 3.5): void {
@@ -80,6 +116,84 @@ export class HudManager {
     if (this.instructionsOverlay) {
       this.instructionsOverlay.style.display = 'none';
     }
+  }
+
+  toggleSettingsModal(show?: boolean): void {
+    if (!this.advSettingsModal) return;
+    const isVisible = this.advSettingsModal.style.display !== 'none';
+    const shouldShow = show !== undefined ? show : !isVisible;
+    this.advSettingsModal.style.display = shouldShow ? 'flex' : 'none';
+    if (shouldShow && document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+  }
+
+  loadSettingsFromStorage(): AdvancedStreamSettings {
+    try {
+      const saved = localStorage.getItem('pixel_planet_stream_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.sectorSize) this.currentSettings.sectorSize = parsed.sectorSize;
+        if (parsed.concurrency) this.currentSettings.concurrency = parsed.concurrency;
+        if (parsed.chunksPerFrame) this.currentSettings.chunksPerFrame = parsed.chunksPerFrame;
+      }
+    } catch {
+      // default
+    }
+    return this.currentSettings;
+  }
+
+  saveSettingsToStorage(): void {
+    try {
+      localStorage.setItem('pixel_planet_stream_settings', JSON.stringify(this.currentSettings));
+    } catch {}
+  }
+
+  applySettingsUI(settings: AdvancedStreamSettings): void {
+    this.currentSettings = { ...settings };
+
+    // Sector size UI
+    if (this.sectorSizeVal) {
+      this.sectorSizeVal.textContent = `${this.currentSettings.sectorSize} × ${this.currentSettings.sectorSize} м`;
+    }
+    this.sectorSizeButtons.forEach(btn => {
+      const b = btn as HTMLElement;
+      b.classList.toggle('active', parseInt(b.dataset.val || '0', 10) === this.currentSettings.sectorSize);
+    });
+
+    // Concurrency UI
+    if (this.concurrencyVal) {
+      const c = this.currentSettings.concurrency;
+      this.concurrencyVal.textContent = `${c} ${c === 1 ? 'поток' : (c < 5 ? 'потока' : 'потоков')}`;
+    }
+    this.concurrencyButtons.forEach(btn => {
+      const b = btn as HTMLElement;
+      b.classList.toggle('active', parseInt(b.dataset.val || '0', 10) === this.currentSettings.concurrency);
+    });
+
+    // Chunks per frame UI
+    if (this.chunksBatchSlider) {
+      this.chunksBatchSlider.value = this.currentSettings.chunksPerFrame.toString();
+    }
+    if (this.chunksBatchVal) {
+      this.chunksBatchVal.textContent = `${this.currentSettings.chunksPerFrame} чанков/кадр`;
+    }
+
+    this.updatePresetButtons();
+    this.saveSettingsToStorage();
+  }
+
+  private updatePresetButtons(): void {
+    const s = this.currentSettings;
+    const isEco = s.sectorSize === 400 && s.concurrency === 1 && s.chunksPerFrame <= 4;
+    const isBalanced = s.sectorSize === 600 && s.concurrency === 2 && s.chunksPerFrame === 6;
+    const isTurbo = s.sectorSize >= 800 && s.concurrency >= 3 && s.chunksPerFrame >= 12;
+
+    this.presetButtons.forEach(btn => {
+      const b = btn as HTMLElement;
+      const p = b.dataset.preset;
+      b.classList.toggle('active', (p === 'eco' && isEco) || (p === 'balanced' && isBalanced) || (p === 'turbo' && isTurbo));
+    });
   }
 
   private initListeners(callbacks: HudCallbacks): void {
@@ -127,6 +241,100 @@ export class HudManager {
         }
       });
     }
+
+    // Modal toggles
+    this.advSettingsBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleSettingsModal();
+    });
+
+    this.openSettingsFullBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleSettingsModal(true);
+    });
+
+    this.closeAdvSettingsBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleSettingsModal(false);
+    });
+
+    // Close modal on outside click
+    window.addEventListener('click', (e) => {
+      if (this.advSettingsModal && this.advSettingsModal.style.display !== 'none') {
+        const target = e.target as HTMLElement;
+        if (!this.advSettingsModal.contains(target) && !this.advSettingsBtn?.contains(target) && !this.openSettingsFullBtn?.contains(target)) {
+          this.toggleSettingsModal(false);
+        }
+      }
+    });
+
+    // Preset buttons
+    this.presetButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const p = (btn as HTMLElement).dataset.preset;
+        if (p === 'eco') {
+          this.currentSettings = { sectorSize: 400, concurrency: 1, chunksPerFrame: 3 };
+        } else if (p === 'balanced') {
+          this.currentSettings = { sectorSize: 600, concurrency: 2, chunksPerFrame: 6 };
+        } else if (p === 'turbo') {
+          this.currentSettings = { sectorSize: 800, concurrency: 3, chunksPerFrame: 14 };
+        }
+        this.applySettingsUI(this.currentSettings);
+        callbacks.onSectorSizeChange?.(this.currentSettings.sectorSize);
+        callbacks.onConcurrencyChange?.(this.currentSettings.concurrency);
+        callbacks.onChunksPerFrameChange?.(this.currentSettings.chunksPerFrame);
+      });
+    });
+
+    // Sector Size chips
+    this.sectorSizeButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const val = parseInt((btn as HTMLElement).dataset.val || '600', 10);
+        this.currentSettings.sectorSize = val;
+        this.applySettingsUI(this.currentSettings);
+        callbacks.onSectorSizeChange?.(val);
+      });
+    });
+
+    // Concurrency chips
+    this.concurrencyButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const val = parseInt((btn as HTMLElement).dataset.val || '2', 10);
+        this.currentSettings.concurrency = val;
+        this.applySettingsUI(this.currentSettings);
+        callbacks.onConcurrencyChange?.(val);
+      });
+    });
+
+    // Chunks Batch slider
+    if (this.chunksBatchSlider) {
+      this.chunksBatchSlider.addEventListener('input', (e) => {
+        const val = parseInt((e.target as HTMLInputElement).value, 10);
+        this.currentSettings.chunksPerFrame = val;
+        if (this.chunksBatchVal) this.chunksBatchVal.textContent = `${val} чанков/кадр`;
+        this.updatePresetButtons();
+        this.saveSettingsToStorage();
+        callbacks.onChunksPerFrameChange?.(val);
+      });
+    }
+
+    // Reload nearby sectors button
+    this.advReloadBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      callbacks.onReloadSectors?.();
+      this.updateStatus('Перезагрузка секторов с новыми настройками...', 3.5);
+    });
+
+    // Clear disk cache button
+    this.advClearCacheBtn?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      this.updateStatus('Очистка локального кэша геометрии...', 2.0);
+      await callbacks.onClearCache?.();
+      this.updateStatus('Кэш полностью очищен! Свежие данные загружаются...', 4.0);
+    });
   }
 
   update(

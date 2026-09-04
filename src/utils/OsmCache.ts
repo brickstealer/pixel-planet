@@ -7,7 +7,7 @@ export class OsmCache {
   storeName: string;
   dbPromise: Promise<IDBDatabase | null>;
 
-  constructor(dbName: string = 'PixelPlanetOsmCache_v3', storeName: string = 'osm_sectors_v3') {
+  constructor(dbName: string = 'PixelPlanetOsmCache_v4', storeName: string = 'osm_sectors_v4') {
     this.dbName = dbName;
     this.storeName = storeName;
     this.dbPromise = this.initDB();

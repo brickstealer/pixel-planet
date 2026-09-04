@@ -95,6 +95,13 @@
       <div class="controls-card glass-panel">
         <div class="hud-card-header">
           <span class="hud-card-title">ВРЕМЯ СУТОК</span>
+          <button id="adv-settings-btn" class="settings-toggle-btn" title="Расширенные настройки загрузки пачками">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span>НАСТРОЙКИ</span>
+          </button>
         </div>
         <div class="time-buttons">
           <button class="time-btn active" data-time="day">ДЕНЬ</button>
@@ -108,6 +115,86 @@
             <span id="render-dist-val">10 чанков</span>
           </div>
           <input id="render-dist-slider" type="range" min="4" max="100" value="10" />
+        </div>
+
+        <button id="open-settings-full-btn" class="adv-settings-trigger-btn">
+          ⚙️ НАСТРОЙКИ ЗАГРУЗКИ ПАЧКАМИ
+        </button>
+      </div>
+    </div>
+
+    <!-- Advanced Stream & Batch Loading Settings Modal -->
+    <div id="adv-settings-modal" class="adv-settings-panel glass-panel hud-interactive" style="display: none;">
+      <div class="adv-settings-header">
+        <div class="adv-settings-title-row">
+          <span class="adv-settings-badge">⚙️ КОНФИГУРАЦИЯ</span>
+          <button id="close-adv-settings-btn" class="adv-close-btn" title="Закрыть">✕</button>
+        </div>
+        <h3 class="adv-settings-title">ПАРАМЕТРЫ ЗАГРУЗКИ МИРА</h3>
+        <p class="adv-settings-subtitle">Регулировка размера пачек, сетевых потоков и частоты сборки вокселей</p>
+      </div>
+
+      <div class="adv-settings-content">
+        <!-- Quick Presets -->
+        <div class="adv-field-group">
+          <label class="adv-field-label">БЫСТРЫЕ ПРЕСЕТЫ:</label>
+          <div class="adv-presets-row">
+            <button class="adv-preset-btn" data-preset="eco">🍃 ЭКО</button>
+            <button class="adv-preset-btn active" data-preset="balanced">⚖️ БАЛАНС</button>
+            <button class="adv-preset-btn" data-preset="turbo">⚡ ТУРБО</button>
+          </div>
+        </div>
+
+        <!-- Sector Size (Grid dimensions) -->
+        <div class="adv-field-group">
+          <div class="adv-field-header">
+            <span class="adv-field-label">РАЗМЕР СЕКТОРА OSM:</span>
+            <span id="sector-size-val" class="adv-field-value">600 × 600 м</span>
+          </div>
+          <div class="adv-options-row" id="sector-size-options">
+            <button class="adv-chip-btn" data-val="100">100 м</button>
+            <button class="adv-chip-btn" data-val="200">200 м</button>
+            <button class="adv-chip-btn" data-val="400">400 м</button>
+            <button class="adv-chip-btn active" data-val="600">600 м</button>
+            <button class="adv-chip-btn" data-val="800">800 м</button>
+            <button class="adv-chip-btn" data-val="1000">1000 м</button>
+          </div>
+          <span class="adv-field-hint">Размер географического квадрата, запрашиваемого за один раз из Overpass API.</span>
+        </div>
+
+        <!-- Network Concurrency -->
+        <div class="adv-field-group">
+          <div class="adv-field-header">
+            <span class="adv-field-label">СЕТЕВЫХ ПОТОКОВ (СЕКТОРОВ):</span>
+            <span id="concurrency-val" class="adv-field-value">2 потока</span>
+          </div>
+          <div class="adv-options-row" id="concurrency-options">
+            <button class="adv-chip-btn" data-val="1">1 (Бережный)</button>
+            <button class="adv-chip-btn active" data-val="2">2 (Оптимально)</button>
+            <button class="adv-chip-btn" data-val="3">3 (Быстрый)</button>
+            <button class="adv-chip-btn" data-val="4">4 (Турбо)</button>
+          </div>
+          <span class="adv-field-hint">Количество параллельных HTTP-запросов к серверам OpenStreetMap.</span>
+        </div>
+
+        <!-- Chunks Mesh per Frame -->
+        <div class="adv-field-group">
+          <div class="adv-field-header">
+            <span class="adv-field-label">СБОРКА ЧАНКОВ ЗА КАДР:</span>
+            <span id="chunks-batch-val" class="adv-field-value">6 чанков/кадр</span>
+          </div>
+          <input id="chunks-batch-slider" type="range" min="2" max="24" step="1" value="6" />
+          <span class="adv-field-hint">Сколько 3D-чанков (32×32м) компилируется за один кадр. Высокие значения быстрее строят город, низкие берегут FPS.</span>
+        </div>
+
+        <!-- Action: Purge & Reload current sectors -->
+        <div class="adv-actions-group">
+          <button id="adv-reload-sectors-btn" class="adv-action-btn">
+            🔄 ПЕРЕЗАГРУЗИТЬ СЕКТОРЫ ВОКРУГ
+          </button>
+          <button id="adv-clear-cache-btn" class="adv-action-btn adv-clear-btn">
+            🗑️ ОЧИСТИТЬ КЭШ ДАННЫХ (INDEXEDDB)
+          </button>
         </div>
       </div>
     </div>
@@ -181,27 +268,27 @@
       <div class="key-grid">
         <div class="key-item">
           <span class="key-badge">W A S D</span>
-          <span>Перемещение / Полет</span>
+          <span class="key-desc">Перемещение / Полёт</span>
         </div>
         <div class="key-item">
           <span class="key-badge">МЫШЬ</span>
-          <span>Свободный обзор</span>
+          <span class="key-desc">Свободный обзор</span>
         </div>
         <div class="key-item">
           <span class="key-badge">SPACE</span>
-          <span>Набор высоты</span>
+          <span class="key-desc">Набор высоты</span>
         </div>
         <div class="key-item">
           <span class="key-badge">SHIFT / E</span>
-          <span>Форсаж (Ускорение)</span>
+          <span class="key-desc">Форсаж (Ускорение)</span>
         </div>
         <div class="key-item">
           <span class="key-badge">C</span>
-          <span>Снижение высоты</span>
+          <span class="key-desc">Снижение высоты</span>
         </div>
         <div class="key-item">
           <span class="key-badge">СКРОЛЛ</span>
-          <span>Регулировка крейсерской скорости</span>
+          <span class="key-desc">Скорость полёта (±)</span>
         </div>
       </div>
 

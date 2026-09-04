@@ -54,6 +54,10 @@ export class ChunkManager {
     this.material = material;
   }
 
+  setMaxChunksPerFrame(val: number): void {
+    this.maxChunksPerFrame = Math.max(1, Math.min(32, Math.round(val)));
+  }
+
   /**
    * Clears all active chunks and queues (e.g. when teleporting)
    */

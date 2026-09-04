@@ -85,8 +85,30 @@ async function initApplication() {
     onRenderDistanceChange: (val: number) => {
       updateRenderDistance(val);
       saveState();
+    },
+    onSectorSizeChange: (size: number) => {
+      osmProvider.setSectorSize(size);
+    },
+    onConcurrencyChange: (concurrency: number) => {
+      osmProvider.setConcurrency(concurrency);
+    },
+    onChunksPerFrameChange: (batch: number) => {
+      chunkManager.setMaxChunksPerFrame(batch);
+    },
+    onReloadSectors: () => {
+      osmProvider.reloadNearbySectors(camera.position.x, camera.position.z);
+      chunkManager.clearAll();
+    },
+    onClearCache: async () => {
+      await osmProvider.clearCache();
+      chunkManager.clearAll();
     }
   });
+
+  // Apply restored stream settings to providers
+  osmProvider.setSectorSize(hud.currentSettings.sectorSize);
+  osmProvider.setConcurrency(hud.currentSettings.concurrency);
+  chunkManager.setMaxChunksPerFrame(hud.currentSettings.chunksPerFrame);
 
   function updateRenderDistance(val: number): void {
     chunkManager.renderDistance = val;
