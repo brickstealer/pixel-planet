@@ -39,9 +39,42 @@
     <!-- Top-Right Stack: Status/Cache (top), Speedometer (mid), Time of Day (bottom) -->
     <div id="top-right-stack" class="top-right-stack hud-interactive">
       <!-- 1. Cache & OSM Network Status Indicator (Topmost) -->
-      <div class="status-pill glass-panel">
+      <div class="status-pill glass-panel" id="status-pill">
         <div class="status-dot" id="status-dot"></div>
         <span id="status-text">Инициализация воксельного мира...</span>
+
+        <!-- Status Legend Tooltip on Hover -->
+        <div class="status-legend-tooltip" id="status-legend">
+          <div class="legend-header">Статусы индикатора загрузки</div>
+          <div class="legend-item">
+            <div class="legend-dot-col"><div class="status-dot loading"></div></div>
+            <div class="legend-info">
+              <span class="legend-name color-loading">Голубой пульс: Загрузка OSM</span>
+              <span class="legend-desc">Скачивание геометрии дорог, зданий и рельефа из Overpass API.</span>
+            </div>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot-col"><div class="status-dot compiling"></div></div>
+            <div class="legend-info">
+              <span class="legend-name color-compiling">Янтарный пульс: Сборка чанков</span>
+              <span class="legend-desc">Генерация 3D вокселей и построение мешей чанков Three.js.</span>
+            </div>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot-col"><div class="status-dot idle"></div></div>
+            <div class="legend-info">
+              <span class="legend-name color-idle">Зелёный: Все объекты готовы</span>
+              <span class="legend-desc">Вся видимая область загружена, в скобках — число объектов в памяти.</span>
+            </div>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot-col"><div class="status-dot error"></div></div>
+            <div class="legend-info">
+              <span class="legend-name color-error">Красный: Ошибка / Не найдено</span>
+              <span class="legend-desc">Сбой сетевого запроса или геолокация не найдена на планете.</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 2. Speedometer Card -->

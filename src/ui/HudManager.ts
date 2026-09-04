@@ -5,6 +5,8 @@ import { ChunkManager } from '../core/ChunkManager.js';
 import { CityConfig } from '../generator/osm/OsmTypes.js';
 import { TimeOfDayMode } from '../rendering/AtmosphereManager.js';
 
+import { OsmDataProvider } from '../generator/osm/OsmDataProvider.js';
+
 export interface HudCallbacks {
   onSearch: (query: string) => Promise<void>;
   onTimeChange: (mode: TimeOfDayMode) => void;
@@ -20,6 +22,7 @@ export class HudManager {
   speedVal = document.getElementById('speed-val');
   speedBar = document.getElementById('speed-bar');
   statusEl = document.getElementById('status-text');
+  statusDot = document.getElementById('status-dot');
 
   renderSlider = document.getElementById('render-dist-slider') as HTMLInputElement | null;
   renderLabel = document.getElementById('render-dist-val');
@@ -30,13 +33,24 @@ export class HudManager {
   searchInput = document.getElementById('search-input') as HTMLInputElement | null;
 
   hudUpdateTimer: number = 0;
+  private statusOverride: string | null = null;
+  private statusOverrideTimer: number = 0;
 
   constructor(callbacks: HudCallbacks) {
     this.initListeners(callbacks);
   }
 
-  updateStatus(msg: string): void {
+  updateStatus(msg: string, timeoutSeconds: number = 3.5): void {
+    this.statusOverride = msg;
+    this.statusOverrideTimer = timeoutSeconds;
     if (this.statusEl) this.statusEl.textContent = msg;
+    if (this.statusDot) {
+      if (msg.toLowerCase().includes('не найдено') || msg.toLowerCase().includes('ошибка')) {
+        this.statusDot.className = 'status-dot error';
+      } else {
+        this.statusDot.className = 'status-dot loading';
+      }
+    }
   }
 
   setLocationHeader(title: string, subtitle: string): void {
@@ -120,11 +134,45 @@ export class HudManager {
     camera: THREE.Camera,
     controls: FlightControls,
     chunkManager: ChunkManager,
-    currentCity: CityConfig | null
+    currentCity: CityConfig | null,
+    osmProvider?: OsmDataProvider | null
   ): void {
+    if (this.statusOverrideTimer > 0) {
+      this.statusOverrideTimer -= dt;
+      if (this.statusOverrideTimer <= 0) {
+        this.statusOverride = null;
+      }
+    }
+
     this.hudUpdateTimer += dt;
     if (this.hudUpdateTimer < 0.1) return; // 10 updates per second is plenty
     this.hudUpdateTimer = 0;
+
+    // Real-time Loading & Generation Indicator
+    if (!this.statusOverride && osmProvider) {
+      const activeFetches = osmProvider.activeFetches.size;
+      const queuedSectors = osmProvider.requestQueue.length;
+      const totalOsmPending = activeFetches + queuedSectors;
+      const pendingChunks = chunkManager.buildQueue.length;
+      const totalFeatures = osmProvider.features.length;
+
+      if (totalOsmPending > 0) {
+        if (this.statusDot) this.statusDot.className = 'status-dot loading';
+        if (this.statusEl) {
+          this.statusEl.textContent = `Загрузка OSM: ${totalOsmPending} сект. (${totalFeatures} объектов)`;
+        }
+      } else if (pendingChunks > 0) {
+        if (this.statusDot) this.statusDot.className = 'status-dot compiling';
+        if (this.statusEl) {
+          this.statusEl.textContent = `Сборка чанков: ${pendingChunks} в очереди...`;
+        }
+      } else {
+        if (this.statusDot) this.statusDot.className = 'status-dot idle';
+        if (this.statusEl) {
+          this.statusEl.textContent = `Все объекты загружены (${totalFeatures} в памяти)`;
+        }
+      }
+    }
 
     // Speed
     const speedKmh = controls.getSpeedKmh();

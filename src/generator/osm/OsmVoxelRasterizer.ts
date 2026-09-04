@@ -352,8 +352,8 @@ export class OsmVoxelRasterizer {
 
       // 3.3 Eiffel Tower
       if (b.isEiffelTower) {
-        const halfWidth = (maxBX - minBX) / 2 || 35;
-        const halfDepth = (maxBZ - minBZ) / 2 || 35;
+        const halfWidth = Math.max(50, (maxBX - minBX) / 2);
+        const halfDepth = Math.max(50, (maxBZ - minBZ) / 2);
         const towerH = Math.min(CHUNK_SIZE_Y - groundY - 2, Math.max(80, Math.floor(b.height / VOXEL_SIZE)));
 
         const hP1 = Math.floor(towerH * 0.18);
@@ -395,7 +395,7 @@ export class OsmVoxelRasterizer {
                   } else if (isCrossBrace || (dy % 4 === 0)) {
                     setBlock(lx, by, lz, BlockType.METAL);
                   } else {
-                    setBlock(lx, by, lz, BlockType.STONE);
+                    setBlock(lx, by, lz, BlockType.MONUMENT_BRONZE);
                   }
                 }
               } else if (dy <= hP3) {
@@ -505,19 +505,30 @@ export class OsmVoxelRasterizer {
       }
 
       // 3.5 Standard buildings
-      // Double defense: Skip any standard building if inside or overlapping a pyramid's sanctuary (+35m buffer)
-      let insidePyramid = false;
+      // Double defense: Skip any standard building if inside or overlapping a pyramid sanctuary or Eiffel Tower sanctuary
+      let insideSpecialSanctuary = false;
       const pad = 35;
       for (const feat of nearbyFeatures) {
-        if (feat.type === 'building' && (feat as OsmBuilding).isPyramid) {
-          const [pMinX, pMinZ, pMaxX, pMaxZ] = feat.bounds;
-          if (minBX <= pMaxX + pad && maxBX >= pMinX - pad && minBZ <= pMaxZ + pad && maxBZ >= pMinZ - pad) {
-            insidePyramid = true;
-            break;
+        if (feat.type === 'building') {
+          const bFeat = feat as OsmBuilding;
+          if (bFeat.isPyramid) {
+            const [pMinX, pMinZ, pMaxX, pMaxZ] = bFeat.bounds;
+            if (minBX <= pMaxX + pad && maxBX >= pMinX - pad && minBZ <= pMaxZ + pad && maxBZ >= pMinZ - pad) {
+              insideSpecialSanctuary = true;
+              break;
+            }
+          } else if (bFeat.isEiffelTower) {
+            const [eMinX, eMinZ, eMaxX, eMaxZ] = bFeat.bounds;
+            const eCenterX = (eMinX + eMaxX) / 2;
+            const eCenterZ = (eMinZ + eMaxZ) / 2;
+            if (Math.hypot(bCenterX - eCenterX, bCenterZ - eCenterZ) < 95) {
+              insideSpecialSanctuary = true;
+              break;
+            }
           }
         }
       }
-      if (insidePyramid) {
+      if (insideSpecialSanctuary) {
         continue;
       }
 

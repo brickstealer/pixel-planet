@@ -572,24 +572,138 @@ html, body {
 .status-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  gap: 10px;
+  padding: 8px 16px;
   font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: all 0.3s ease;
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
+  flex-shrink: 0;
   background-color: var(--accent-green);
   box-shadow: 0 0 8px var(--accent-green);
-  animation: pulse 2s infinite;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
-@keyframes pulse {
-  0% { opacity: 0.6; }
-  50% { opacity: 1; }
-  100% { opacity: 0.6; }
+.status-dot.idle {
+  background-color: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.8);
+  animation: pulse-slow 3s infinite ease-in-out;
+}
+
+.status-dot.loading {
+  background-color: #38bdf8;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.95);
+  animation: pulse-active 0.8s infinite alternate ease-in-out;
+}
+
+.status-dot.compiling {
+  background-color: #f59e0b;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.95);
+  animation: pulse-active 0.6s infinite alternate ease-in-out;
+}
+
+.status-dot.error {
+  background-color: #ef4444;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.9);
+}
+
+@keyframes pulse-slow {
+  0% { opacity: 0.7; transform: scale(0.95); }
+  50% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0.7; transform: scale(0.95); }
+}
+
+@keyframes pulse-active {
+  0% { opacity: 0.55; transform: scale(0.85); }
+  100% { opacity: 1; transform: scale(1.3); }
+}
+
+/* Status Legend Tooltip on Hover */
+.top-right-stack .status-pill {
+  position: relative;
+  cursor: help;
+}
+
+.status-legend-tooltip {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 12px);
+  width: 320px;
+  background: rgba(10, 16, 30, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 20px rgba(56, 189, 248, 0.15);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(8px);
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+  pointer-events: none;
+  z-index: 100;
+  text-align: left;
+}
+
+.status-pill:hover .status-legend-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+}
+
+.legend-header {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #38bdf8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.legend-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.legend-item:last-child {
+  margin-bottom: 0;
+}
+
+.legend-dot-col {
+  padding-top: 3px;
+  flex-shrink: 0;
+}
+
+.legend-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.legend-name {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.color-loading { color: #38bdf8; }
+.color-compiling { color: #fbbf24; }
+.color-idle { color: #34d399; }
+.color-error { color: #f87171; }
+
+.legend-desc {
+  font-size: 0.70rem;
+  color: #94a3b8;
+  line-height: 1.35;
 }
 
 /* Start Overlay / Click to fly */

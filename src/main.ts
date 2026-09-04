@@ -51,7 +51,6 @@ async function initApplication() {
   // Callback for when new OSM data arrives in background
   osmProvider.onFeaturesLoaded = () => {
     chunkManager.refreshNonOsmChunks();
-    hud.updateStatus(osmProvider.statusMessage);
   };
 
   // 5. HUD Setup
@@ -162,7 +161,7 @@ async function initApplication() {
     clouds.update(delta);
 
     // HUD telemetry update
-    hud.update(delta, camera, controls, chunkManager, currentCity);
+    hud.update(delta, camera, controls, chunkManager, currentCity, osmProvider);
 
     // Crosshair inspection update
     inspector.update(delta);

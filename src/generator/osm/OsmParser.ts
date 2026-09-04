@@ -369,14 +369,30 @@ export class OsmParser {
             nameLower.includes('résidence');
 
           const distFromParisEiffel = Math.hypot((centerLat - 48.85837) * 110540, (centerLon - 2.29448) * 73000);
-          const isRealParisEiffel = distFromParisEiffel < 160 && (tags.man_made === 'tower' || tags.tourism === 'attraction' || nameLower.includes('tour eiffel') || nameLower.includes('эйфелева'));
+          const isParisEiffelArea = distFromParisEiffel < 200;
 
-          const isEiffelNameExact = nameLower === 'tour eiffel' ||
+          const isEiffelWikidata = tags.wikidata === 'Q243';
+          const isEiffelWiki = tags.wikipedia === 'fr:Tour Eiffel' || tags.wikipedia === 'en:Eiffel Tower' || tags.wikipedia === 'ru:Эйфелева башня';
+
+          const isSubComponent = tags['building:part'] === 'yes' ||
+            tags['building'] === 'pavilion' ||
+            nameLower.includes('étage') ||
+            nameLower.includes('etage') ||
+            nameLower.includes('pavillon') ||
+            nameLower.includes('plateforme') ||
+            nameLower.includes('sommet') ||
+            nameLower.includes('pilier') ||
+            nameLower.includes('société') ||
+            nameLower.includes('societe');
+
+          const isRealParisEiffelMaster = (isEiffelWikidata || isEiffelWiki || (isParisEiffelArea && tags.man_made === 'tower' && !isSubComponent && elem.type === 'way')) && !isCommercialOrLiving;
+
+          const isEiffelNameExact = (nameLower === 'tour eiffel' ||
             nameLower === 'la tour eiffel' ||
             nameLower === 'eiffel tower' ||
-            nameLower === 'эйфелева башня';
+            nameLower === 'эйфелева башня') && !isSubComponent;
 
-          const isEiffelTower = !isCommercialOrLiving && (isRealParisEiffel || (isEiffelNameExact && (tags.man_made === 'tower' || tags.tourism === 'attraction')));
+          const isEiffelTower = isRealParisEiffelMaster || (isEiffelNameExact && tags.man_made === 'tower' && tags['building:part'] !== 'yes');
 
           const isTower = isEiffelTower ||
             (!isCommercialOrLiving && (tags.man_made === 'tower' ||

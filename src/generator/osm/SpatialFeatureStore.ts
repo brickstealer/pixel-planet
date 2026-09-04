@@ -43,16 +43,49 @@ export class SpatialFeatureStore {
         if (purged) {
           this.rebuildSpatialBuckets();
         }
+      } else if (b.isEiffelTower) {
+        const [eMinX, eMinZ, eMaxX, eMaxZ] = b.bounds;
+        const eCenterX = (eMinX + eMaxX) / 2;
+        const eCenterZ = (eMinZ + eMaxZ) / 2;
+        const sanctuaryRadius = 95; // Clear esplanade under & around 125x125m Eiffel Tower base
+        let purged = false;
+        this.features = this.features.filter(f => {
+          if (f.type === 'building' && !(f as OsmBuilding).isEiffelTower) {
+            const [fMinX, fMinZ, fMaxX, fMaxZ] = f.bounds;
+            const fcX = (fMinX + fMaxX) / 2;
+            const fcZ = (fMinZ + fMaxZ) / 2;
+            if (Math.hypot(fcX - eCenterX, fcZ - eCenterZ) < sanctuaryRadius) {
+              purged = true;
+              return false; // Remove conflicting building inside Eiffel sanctuary
+            }
+          }
+          return true;
+        });
+        if (purged) {
+          this.rebuildSpatialBuckets();
+        }
       } else {
-        // If adding a non-pyramid building, check if it overlaps any known pyramid sanctuary
+        // If adding a regular building, check if it overlaps any known pyramid or Eiffel sanctuary
         const [minX, minZ, maxX, maxZ] = b.bounds;
         const pad = 35;
+        const bcX = (minX + maxX) / 2;
+        const bcZ = (minZ + maxZ) / 2;
         for (const f of this.features) {
-          if (f.type === 'building' && (f as OsmBuilding).isPyramid) {
-            const [pMinX, pMinZ, pMaxX, pMaxZ] = f.bounds;
-            const overlaps = (minX <= pMaxX + pad && maxX >= pMinX - pad && minZ <= pMaxZ + pad && maxZ >= pMinZ - pad);
-            if (overlaps) {
-              return; // Skip adding non-pyramid building in pyramid sanctuary!
+          if (f.type === 'building') {
+            const bFeat = f as OsmBuilding;
+            if (bFeat.isPyramid) {
+              const [pMinX, pMinZ, pMaxX, pMaxZ] = bFeat.bounds;
+              const overlaps = (minX <= pMaxX + pad && maxX >= pMinX - pad && minZ <= pMaxZ + pad && maxZ >= pMinZ - pad);
+              if (overlaps) {
+                return; // Skip adding non-pyramid building in pyramid sanctuary!
+              }
+            } else if (bFeat.isEiffelTower) {
+              const [eMinX, eMinZ, eMaxX, eMaxZ] = bFeat.bounds;
+              const eCenterX = (eMinX + eMaxX) / 2;
+              const eCenterZ = (eMinZ + eMaxZ) / 2;
+              if (Math.hypot(bcX - eCenterX, bcZ - eCenterZ) < 95) {
+                return; // Skip adding building inside Eiffel sanctuary!
+              }
             }
           }
         }
