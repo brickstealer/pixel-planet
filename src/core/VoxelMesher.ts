@@ -9,69 +9,65 @@ import {
   isBlockTransparent
 } from './VoxelTypes.js';
 
-interface FaceDef {
-  dir: [number, number, number];
-  norm: [number, number, number];
+interface FastFaceDef {
+  dirX: number;
+  dirY: number;
+  dirZ: number;
+  normX: number;
+  normY: number;
+  normZ: number;
   light: number;
-  corners: [number, number, number][];
+  triVertices: Float32Array; // 18 numbers: 6 vertices * 3 coords
+  ao: Float32Array;          // 6 numbers
 }
 
-const FACES: FaceDef[] = [
+const RAW_FACES = [
   // 0: +X (Right)
-  {
-    dir: [1, 0, 0],
-    norm: [1, 0, 0],
-    light: 0.75,
-    corners: [
-      [1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]
-    ]
-  },
+  { dir: [1, 0, 0], norm: [1, 0, 0], light: 0.75, corners: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], isWall: true },
   // 1: -X (Left)
-  {
-    dir: [-1, 0, 0],
-    norm: [-1, 0, 0],
-    light: 0.70,
-    corners: [
-      [0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]
-    ]
-  },
+  { dir: [-1, 0, 0], norm: [-1, 0, 0], light: 0.70, corners: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], isWall: true },
   // 2: +Y (Top / Sky)
-  {
-    dir: [0, 1, 0],
-    norm: [0, 1, 0],
-    light: 1.00,
-    corners: [
-      [0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]
-    ]
-  },
+  { dir: [0, 1, 0], norm: [0, 1, 0], light: 1.00, corners: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], isWall: false },
   // 3: -Y (Bottom / Ground)
-  {
-    dir: [0, -1, 0],
-    norm: [0, -1, 0],
-    light: 0.50,
-    corners: [
-      [0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]
-    ]
-  },
+  { dir: [0, -1, 0], norm: [0, -1, 0], light: 0.50, corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], isWall: false },
   // 4: +Z (Front)
-  {
-    dir: [0, 0, 1],
-    norm: [0, 0, 1],
-    light: 0.85,
-    corners: [
-      [1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]
-    ]
-  },
+  { dir: [0, 0, 1], norm: [0, 0, 1], light: 0.85, corners: [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]], isWall: true },
   // 5: -Z (Back)
-  {
-    dir: [0, 0, -1],
-    norm: [0, 0, -1],
-    light: 0.80,
-    corners: [
-      [0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]
-    ]
-  }
+  { dir: [0, 0, -1], norm: [0, 0, -1], light: 0.80, corners: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]], isWall: true }
 ];
+
+const TRI_INDICES = [0, 1, 2, 0, 2, 3];
+
+const FAST_FACES: FastFaceDef[] = RAW_FACES.map(f => {
+  const triVerts = new Float32Array(18);
+  const ao = new Float32Array(6);
+
+  for (let i = 0; i < 6; i++) {
+    const cIdx = TRI_INDICES[i];
+    const corner = f.corners[cIdx];
+    triVerts[i * 3 + 0] = corner[0];
+    triVerts[i * 3 + 1] = corner[1];
+    triVerts[i * 3 + 2] = corner[2];
+
+    if (f.isWall) {
+      ao[i] = 0.88 + 0.12 * (cIdx === 1 || cIdx === 2 ? 1.0 : 0.0);
+    } else {
+      ao[i] = 1.0;
+    }
+  }
+
+  return {
+    dirX: f.dir[0],
+    dirY: f.dir[1],
+    dirZ: f.dir[2],
+    normX: f.norm[0],
+    normY: f.norm[1],
+    normZ: f.norm[2],
+    light: f.light,
+    triVertices: triVerts,
+    ao
+  };
+});
 
 export interface NeighborChunkProvider {
   getBlock(x: number, y: number, z: number): BlockType;
@@ -86,7 +82,7 @@ export interface NeighborChunks {
 
 export class VoxelMesher {
   /**
-   * Builds an optimized Three.js BufferGeometry from a 3D voxel array
+   * Builds an optimized Three.js BufferGeometry from a 3D voxel array with zero-allocation inner loops
    */
   static buildMesh(voxels: Uint8Array, neighborChunks: NeighborChunks = {}): THREE.BufferGeometry | null {
     const positions: number[] = [];
@@ -126,8 +122,6 @@ export class VoxelMesher {
       return (voxels[idx] as BlockType) || BlockType.AIR;
     };
 
-    const triIndices = [0, 1, 2, 0, 2, 3];
-
     for (let y = 0; y < CHUNK_SIZE_Y; y++) {
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
         for (let x = 0; x < CHUNK_SIZE_X; x++) {
@@ -136,14 +130,17 @@ export class VoxelMesher {
           if (block === BlockType.AIR) continue;
 
           const baseCol = BlockPalette[block] || [0.5, 0.5, 0.5];
+          const baseR = baseCol[0];
+          const baseG = baseCol[1];
+          const baseB = baseCol[2];
           const isLitWindow = (block === BlockType.WINDOW_LIT);
 
           // Check 6 directions
           for (let f = 0; f < 6; f++) {
-            const face = FACES[f];
-            const nx = x + face.dir[0];
-            const ny = y + face.dir[1];
-            const nz = z + face.dir[2];
+            const face = FAST_FACES[f];
+            const nx = x + face.dirX;
+            const ny = y + face.dirY;
+            const nz = z + face.dirZ;
 
             const neighborBlock = getBlock(nx, ny, nz);
 
@@ -154,33 +151,24 @@ export class VoxelMesher {
 
             if (!renderFace) continue;
 
-            const lightFactor = face.light;
-            const norm = face.norm;
+            const fVerts = face.triVertices;
+            const fAo = face.ao;
+            const normX = face.normX;
+            const normY = face.normY;
+            const normZ = face.normZ;
+            const light = face.light;
 
-            // Compute quad corners
-            const quadVertices = face.corners.map(c => [
-              (x + c[0]) * VOXEL_SIZE,
-              (y + c[1]) * VOXEL_SIZE,
-              (z + c[2]) * VOXEL_SIZE
-            ]);
+            // Direct zero-allocation loop
+            for (let i = 0, v = 0; i < 6; i++, v += 3) {
+              positions.push(
+                (x + fVerts[v]) * VOXEL_SIZE,
+                (y + fVerts[v + 1]) * VOXEL_SIZE,
+                (z + fVerts[v + 2]) * VOXEL_SIZE
+              );
+              normals.push(normX, normY, normZ);
 
-            for (let i = 0; i < 6; i++) {
-              const cornerIdx = triIndices[i];
-              const vert = quadVertices[cornerIdx];
-              positions.push(vert[0], vert[1], vert[2]);
-              normals.push(norm[0], norm[1], norm[2]);
-
-              // Subtle vertical gradient on vertical walls
-              let ao = 1.0;
-              if (!isLitWindow && face.dir[1] === 0) {
-                ao = 0.88 + 0.12 * (cornerIdx === 1 || cornerIdx === 2 ? 1 : 0);
-              }
-
-              const r = baseCol[0] * lightFactor * ao;
-              const g = baseCol[1] * lightFactor * ao;
-              const b = baseCol[2] * lightFactor * ao;
-
-              colors.push(r, g, b);
+              const ao = isLitWindow ? 1.0 : fAo[i];
+              colors.push(baseR * light * ao, baseG * light * ao, baseB * light * ao);
               emissives.push(isLitWindow ? 1.0 : 0.0);
             }
           }

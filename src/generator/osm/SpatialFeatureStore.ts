@@ -16,9 +16,18 @@ export class SpatialFeatureStore {
   spatialBuckets: Map<string, OsmFeature[]> = new Map();
   features: OsmFeature[] = [];
 
+  private sanctuaries: Array<{
+    type: 'pyramid' | 'eiffel';
+    bounds: [number, number, number, number];
+    centerX: number;
+    centerZ: number;
+    radiusSq: number;
+  }> = [];
+
   clear(): void {
     this.spatialBuckets.clear();
     this.features = [];
+    this.sanctuaries = [];
   }
 
   addFeature(feature: OsmFeature): void {
@@ -27,6 +36,13 @@ export class SpatialFeatureStore {
       if (b.isPyramid) {
         const [pMinX, pMinZ, pMaxX, pMaxZ] = b.bounds;
         const pad = 35;
+        this.sanctuaries.push({
+          type: 'pyramid',
+          bounds: [pMinX - pad, pMinZ - pad, pMaxX + pad, pMaxZ + pad],
+          centerX: (pMinX + pMaxX) / 2,
+          centerZ: (pMinZ + pMaxZ) / 2,
+          radiusSq: 0
+        });
         // Purge any existing non-pyramid buildings whose bounds overlap this pyramid sanctuary
         let purged = false;
         this.features = this.features.filter(f => {
@@ -35,7 +51,7 @@ export class SpatialFeatureStore {
             const overlaps = (fMinX <= pMaxX + pad && fMaxX >= pMinX - pad && fMinZ <= pMaxZ + pad && fMaxZ >= pMinZ - pad);
             if (overlaps) {
               purged = true;
-              return false; // Remove overlapping building in pyramid sanctuary
+              return false;
             }
           }
           return true;
@@ -48,6 +64,13 @@ export class SpatialFeatureStore {
         const eCenterX = (eMinX + eMaxX) / 2;
         const eCenterZ = (eMinZ + eMaxZ) / 2;
         const sanctuaryRadius = 95; // Clear esplanade under & around 125x125m Eiffel Tower base
+        this.sanctuaries.push({
+          type: 'eiffel',
+          bounds: [eCenterX - sanctuaryRadius, eCenterZ - sanctuaryRadius, eCenterX + sanctuaryRadius, eCenterZ + sanctuaryRadius],
+          centerX: eCenterX,
+          centerZ: eCenterZ,
+          radiusSq: sanctuaryRadius * sanctuaryRadius
+        });
         let purged = false;
         this.features = this.features.filter(f => {
           if (f.type === 'building' && !(f as OsmBuilding).isEiffelTower) {
@@ -56,7 +79,7 @@ export class SpatialFeatureStore {
             const fcZ = (fMinZ + fMaxZ) / 2;
             if (Math.hypot(fcX - eCenterX, fcZ - eCenterZ) < sanctuaryRadius) {
               purged = true;
-              return false; // Remove conflicting building inside Eiffel sanctuary
+              return false;
             }
           }
           return true;
@@ -64,28 +87,22 @@ export class SpatialFeatureStore {
         if (purged) {
           this.rebuildSpatialBuckets();
         }
-      } else {
-        // If adding a regular building, check if it overlaps any known pyramid or Eiffel sanctuary
+      } else if (this.sanctuaries.length > 0) {
+        // Fast O(1) check against known sanctuaries only
         const [minX, minZ, maxX, maxZ] = b.bounds;
-        const pad = 35;
         const bcX = (minX + maxX) / 2;
         const bcZ = (minZ + maxZ) / 2;
-        for (const f of this.features) {
-          if (f.type === 'building') {
-            const bFeat = f as OsmBuilding;
-            if (bFeat.isPyramid) {
-              const [pMinX, pMinZ, pMaxX, pMaxZ] = bFeat.bounds;
-              const overlaps = (minX <= pMaxX + pad && maxX >= pMinX - pad && minZ <= pMaxZ + pad && maxZ >= pMinZ - pad);
-              if (overlaps) {
-                return; // Skip adding non-pyramid building in pyramid sanctuary!
-              }
-            } else if (bFeat.isEiffelTower) {
-              const [eMinX, eMinZ, eMaxX, eMaxZ] = bFeat.bounds;
-              const eCenterX = (eMinX + eMaxX) / 2;
-              const eCenterZ = (eMinZ + eMaxZ) / 2;
-              if (Math.hypot(bcX - eCenterX, bcZ - eCenterZ) < 95) {
-                return; // Skip adding building inside Eiffel sanctuary!
-              }
+        for (const s of this.sanctuaries) {
+          if (s.type === 'pyramid') {
+            const [pMinX, pMinZ, pMaxX, pMaxZ] = s.bounds;
+            if (minX <= pMaxX && maxX >= pMinX && minZ <= pMaxZ && maxZ >= pMinZ) {
+              return; // Skip adding building in pyramid sanctuary
+            }
+          } else if (s.type === 'eiffel') {
+            const dx = bcX - s.centerX;
+            const dz = bcZ - s.centerZ;
+            if (dx * dx + dz * dz < s.radiusSq) {
+              return; // Skip adding building inside Eiffel sanctuary
             }
           }
         }

@@ -45,6 +45,7 @@ export class ChunkManager {
   lastPlayerChunk: { cx: number | null; cz: number | null } = { cx: null, cz: null };
 
   maxChunksPerFrame: number = 6;
+  frameTimeBudgetMs: number = 7.0; // Max 7ms per frame to strictly protect 60 FPS
   totalVoxelsRendered: number = 0;
 
   constructor(scene: THREE.Scene, terrainGen: ITerrainGenerator, osmProvider: IOsmProvider | null, material: THREE.Material) {
@@ -157,11 +158,20 @@ export class ChunkManager {
   }
 
   processQueue(): void {
+    const startTime = performance.now();
     let buildsThisFrame = 0;
-    // Adaptive build budget: scale up if queue is large for high render distances
-    const batchLimit = Math.min(24, Math.max(this.maxChunksPerFrame, Math.floor(this.buildQueue.length / 25)));
+    const maxChunks = Math.max(1, this.maxChunksPerFrame);
 
-    while (this.buildQueue.length > 0 && buildsThisFrame < batchLimit) {
+    while (this.buildQueue.length > 0) {
+      // If we already built at least 1 chunk and reached our frame time budget (e.g. 7ms),
+      // yield back to the main thread so 60 FPS is completely smooth without stutter!
+      if (buildsThisFrame >= 1 && (performance.now() - startTime) >= this.frameTimeBudgetMs) {
+        break;
+      }
+      if (buildsThisFrame >= maxChunks) {
+        break;
+      }
+
       const task = this.buildQueue.shift();
       if (!task) break;
       if (this.activeChunks.has(task.key)) continue;
@@ -250,39 +260,47 @@ export class ChunkManager {
   }
 
   /**
-   * Rebuilds chunks when newly streamed OSM data arrives
+   * Rebuilds chunks when newly streamed OSM data arrives.
+   * Instead of synchronous blocking meshes that freeze the browser,
+   * queued chunks are given high priority and compiled smoothly across frames.
    */
   refreshNonOsmChunks(): void {
+    const pcx = this.lastPlayerChunk.cx ?? 0;
+    const pcz = this.lastPlayerChunk.cz ?? 0;
+    const queuedKeys = new Set(this.buildQueue.map(item => item.key));
+    let queuedAny = false;
+
     for (const [key, chunk] of this.activeChunks.entries()) {
       if (!chunk.usedOsm) {
-        const testVoxels = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
-        try {
-          if (this.osmProvider && this.osmProvider.populateChunk(chunk.cx, chunk.cz, testVoxels)) {
-            // Real OSM data has arrived for this chunk! Rebuild mesh
-            if (chunk.mesh) {
-              this.scene.remove(chunk.mesh);
-              chunk.mesh.geometry.dispose();
-            }
-            const newGeo = VoxelMesher.buildMesh(testVoxels);
-            if (newGeo) {
-              const mesh = new THREE.Mesh(newGeo, this.material);
-              mesh.position.set(
-                chunk.cx * CHUNK_SIZE_X * VOXEL_SIZE,
-                0,
-                chunk.cz * CHUNK_SIZE_Z * VOXEL_SIZE
-              );
-              mesh.matrixAutoUpdate = false;
-              mesh.updateMatrix();
-              this.scene.add(mesh);
-              chunk.mesh = mesh;
-            }
-            chunk.voxels = testVoxels;
-            chunk.usedOsm = true;
+        const startX = chunk.cx * CHUNK_SIZE_X * VOXEL_SIZE;
+        const startZ = chunk.cz * CHUNK_SIZE_Z * VOXEL_SIZE;
+        const midX = startX + (CHUNK_SIZE_X * VOXEL_SIZE) / 2;
+        const midZ = startZ + (CHUNK_SIZE_Z * VOXEL_SIZE) / 2;
+
+        if (this.osmProvider && this.osmProvider.isPointInLoadedSector(midX, midZ)) {
+          // Dispose temporary warning stripe mesh
+          if (chunk.mesh) {
+            this.scene.remove(chunk.mesh);
+            chunk.mesh.geometry.dispose();
           }
-        } catch (err) {
-          console.error(`Error refreshing chunk ${key}:`, err);
+          this.activeChunks.delete(key);
+
+          // Insert into build queue with urgent priority ahead of distant chunks
+          if (!queuedKeys.has(key)) {
+            const dx = chunk.cx - pcx;
+            const dz = chunk.cz - pcz;
+            const priority = (dx * dx + dz * dz) - 10000;
+            this.buildQueue.push({ cx: chunk.cx, cz: chunk.cz, key, priority });
+            queuedKeys.add(key);
+            queuedAny = true;
+          }
         }
       }
+    }
+
+    if (queuedAny) {
+      // Prioritize chunks closest to player to rebuild first
+      this.buildQueue.sort((a, b) => a.priority - b.priority);
     }
   }
 
