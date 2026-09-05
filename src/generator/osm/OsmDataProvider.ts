@@ -51,6 +51,7 @@ export class OsmDataProvider {
   setSectorSize(newSize: number): void {
     if (this.sectorSize === newSize) return;
     this.sectorSize = Math.max(100, Math.min(1500, newSize));
+    this.fetchedSectors.clear();
     this.queuedSectors.clear();
     this.requestQueue = [];
     this.lastCheckPos = { x: 0, z: 0 };
@@ -110,8 +111,23 @@ export class OsmDataProvider {
     this.isLoading = true;
     this.statusMessage = `Загрузка OSM для [${lat.toFixed(3)}, ${lon.toFixed(3)}]...`;
 
-    await this.fetchSectorByWorld(0, 0, initialRadius);
+    // Fetch initial master sector
+    const res = await this.fetchSectorByWorld(0, 0, initialRadius, '0,0');
     this.isLoading = false;
+
+    if (res.success) {
+      // Mark all grid sectors within initialRadius as successfully fetched!
+      const rSectors = Math.ceil(initialRadius / this.sectorSize);
+      for (let sx = -rSectors; sx <= rSectors; sx++) {
+        for (let sz = -rSectors; sz <= rSectors; sz++) {
+          const cX = (sx + 0.5) * this.sectorSize;
+          const cZ = (sz + 0.5) * this.sectorSize;
+          if (Math.hypot(cX, cZ) <= initialRadius + this.sectorSize * 0.5) {
+            this.fetchedSectors.add(`${sx},${sz}`);
+          }
+        }
+      }
+    }
   }
 
   checkStreaming(playerWorldX: number, playerWorldZ: number, renderDistChunks: number = 10): void {
@@ -119,7 +135,7 @@ export class OsmDataProvider {
     const now = Date.now();
 
     const distSinceCheck = Math.hypot(playerWorldX - this.lastCheckPos.x, playerWorldZ - this.lastCheckPos.z);
-    if (distSinceCheck < 40 && (now - this.lastCheckTime) < 1500) {
+    if (distSinceCheck < 30 && (now - this.lastCheckTime) < 1200) {
       return;
     }
     this.lastCheckTime = now;
@@ -132,9 +148,11 @@ export class OsmDataProvider {
     const viewDistMeters = renderDistChunks * 32;
     const sectorR = Math.min(16, Math.max(1, Math.ceil(viewDistMeters / SECTOR_SIZE)));
 
+    // Prune queue to active view distance + buffer so distant sectors don't block close ones
+    const maxActiveDist = viewDistMeters + 150;
     this.requestQueue = this.requestQueue.filter(task => {
       const d = Math.hypot(task.worldX - playerWorldX, task.worldZ - playerWorldZ);
-      if (d > 3200) {
+      if (d > maxActiveDist) {
         this.queuedSectors.delete(task.sectorKey);
         return false;
       }
@@ -283,7 +301,14 @@ export class OsmDataProvider {
     const SECTOR_SIZE = this.sectorSize;
     const sx = Math.floor(worldX / SECTOR_SIZE);
     const sz = Math.floor(worldZ / SECTOR_SIZE);
-    return this.fetchedSectors.has(`${sx},${sz}`);
+    if (this.fetchedSectors.has(`${sx},${sz}`)) return true;
+
+    // Anchor initial radius (~850m) is already fetched and stored in memory upon city teleport!
+    if (Math.hypot(worldX, worldZ) <= 850) {
+      return true;
+    }
+
+    return false;
   }
 
   populateChunk(chunkX: number, chunkZ: number, voxels: Uint8Array, groundY: number = 20): boolean {
