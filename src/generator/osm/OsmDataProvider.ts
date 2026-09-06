@@ -43,9 +43,14 @@ export class OsmDataProvider {
 
   sectorSize: number = 600;
   maxActiveFetches: number = 2;
+  useInitialCircle: boolean = false;
 
   constructor() {
     this.client = new OverpassClient(this.cache);
+  }
+
+  setInitialCircle(enabled: boolean): void {
+    this.useInitialCircle = enabled;
   }
 
   setSectorSize(newSize: number): void {
@@ -107,26 +112,34 @@ export class OsmDataProvider {
     this.requestQueue = [];
     this.isProcessingQueue = false;
     this.lastCheckPos = { x: 0, z: 0 };
+    this.lastCheckTime = 0;
 
-    this.isLoading = true;
-    this.statusMessage = `Загрузка OSM для [${lat.toFixed(3)}, ${lon.toFixed(3)}]...`;
+    if (this.useInitialCircle) {
+      this.isLoading = true;
+      this.statusMessage = `Загрузка OSM для [${lat.toFixed(3)}, ${lon.toFixed(3)}]...`;
 
-    // Fetch initial master sector
-    const res = await this.fetchSectorByWorld(0, 0, initialRadius, '0,0');
-    this.isLoading = false;
+      // Fetch initial master sector
+      const res = await this.fetchSectorByWorld(0, 0, initialRadius, '0,0');
+      this.isLoading = false;
 
-    if (res.success) {
-      // Mark all grid sectors within initialRadius as successfully fetched!
-      const rSectors = Math.ceil(initialRadius / this.sectorSize);
-      for (let sx = -rSectors; sx <= rSectors; sx++) {
-        for (let sz = -rSectors; sz <= rSectors; sz++) {
-          const cX = (sx + 0.5) * this.sectorSize;
-          const cZ = (sz + 0.5) * this.sectorSize;
-          if (Math.hypot(cX, cZ) <= initialRadius + this.sectorSize * 0.5) {
-            this.fetchedSectors.add(`${sx},${sz}`);
+      if (res.success) {
+        // Mark all grid sectors within initialRadius as successfully fetched!
+        const rSectors = Math.ceil(initialRadius / this.sectorSize);
+        for (let sx = -rSectors; sx <= rSectors; sx++) {
+          for (let sz = -rSectors; sz <= rSectors; sz++) {
+            const cX = (sx + 0.5) * this.sectorSize;
+            const cZ = (sz + 0.5) * this.sectorSize;
+            if (Math.hypot(cX, cZ) <= initialRadius + this.sectorSize * 0.5) {
+              this.fetchedSectors.add(`${sx},${sz}`);
+            }
           }
         }
       }
+    } else {
+      // FAST STREAM MODE: Immediately trigger streaming of nearest sectors without blocking
+      this.isLoading = false;
+      this.statusMessage = 'Быстрый старт: стриминг секторов OSM...';
+      this.checkStreaming(0, 0, 10);
     }
   }
 
@@ -303,8 +316,8 @@ export class OsmDataProvider {
     const sz = Math.floor(worldZ / SECTOR_SIZE);
     if (this.fetchedSectors.has(`${sx},${sz}`)) return true;
 
-    // Anchor initial radius (~850m) is already fetched and stored in memory upon city teleport!
-    if (Math.hypot(worldX, worldZ) <= 850) {
+    // Anchor initial radius (~850m) was fetched as a single master query only if useInitialCircle is enabled
+    if (this.useInitialCircle && Math.hypot(worldX, worldZ) <= 850) {
       return true;
     }
 

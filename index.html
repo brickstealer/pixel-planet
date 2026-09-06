@@ -162,6 +162,19 @@
           <span class="adv-field-hint">Размер географического квадрата, запрашиваемого за один раз из Overpass API.</span>
         </div>
 
+        <!-- Initial Anchor Circle Mode -->
+        <div class="adv-field-group">
+          <div class="adv-field-header">
+            <span class="adv-field-label">ПЕРВИЧНЫЙ КРУГ ПРИ ВЫСАДКЕ:</span>
+            <span id="initial-circle-val" class="adv-field-value">⚡ Быстрый старт</span>
+          </div>
+          <div class="adv-options-row" id="initial-circle-options">
+            <button class="adv-chip-btn active" data-val="false">⚡ Быстрый старт</button>
+            <button class="adv-chip-btn" data-val="true">🐢 Круг 900м</button>
+          </div>
+          <span class="adv-field-hint">"Быстрый старт" моментально строит кварталы секторами за секунду. "Круг 900м" скачивает 3 км² одним большим тяжелым запросом.</span>
+        </div>
+
         <!-- Network Concurrency -->
         <div class="adv-field-group">
           <div class="adv-field-header">

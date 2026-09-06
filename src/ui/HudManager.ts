@@ -11,6 +11,7 @@ export interface AdvancedStreamSettings {
   sectorSize: number;
   concurrency: number;
   chunksPerFrame: number;
+  initialCircle: boolean;
 }
 
 export interface HudCallbacks {
@@ -20,6 +21,7 @@ export interface HudCallbacks {
   onSectorSizeChange?: (size: number) => void;
   onConcurrencyChange?: (concurrency: number) => void;
   onChunksPerFrameChange?: (batch: number) => void;
+  onInitialCircleChange?: (enabled: boolean) => void;
   onReloadSectors?: () => void;
   onClearCache?: () => Promise<void>;
 }
@@ -51,10 +53,12 @@ export class HudManager {
 
   presetButtons = document.querySelectorAll('.adv-preset-btn');
   sectorSizeButtons = document.querySelectorAll('#sector-size-options .adv-chip-btn');
+  initialCircleButtons = document.querySelectorAll('#initial-circle-options .adv-chip-btn');
   concurrencyButtons = document.querySelectorAll('#concurrency-options .adv-chip-btn');
   chunksBatchSlider = document.getElementById('chunks-batch-slider') as HTMLInputElement | null;
 
   sectorSizeVal = document.getElementById('sector-size-val');
+  initialCircleVal = document.getElementById('initial-circle-val');
   concurrencyVal = document.getElementById('concurrency-val');
   chunksBatchVal = document.getElementById('chunks-batch-val');
   advReloadBtn = document.getElementById('adv-reload-sectors-btn');
@@ -63,7 +67,8 @@ export class HudManager {
   currentSettings: AdvancedStreamSettings = {
     sectorSize: 600,
     concurrency: 2,
-    chunksPerFrame: 6
+    chunksPerFrame: 6,
+    initialCircle: false
   };
 
   hudUpdateTimer: number = 0;
@@ -136,6 +141,7 @@ export class HudManager {
         if (parsed.sectorSize) this.currentSettings.sectorSize = parsed.sectorSize;
         if (parsed.concurrency) this.currentSettings.concurrency = parsed.concurrency;
         if (parsed.chunksPerFrame) this.currentSettings.chunksPerFrame = parsed.chunksPerFrame;
+        if (typeof parsed.initialCircle === 'boolean') this.currentSettings.initialCircle = parsed.initialCircle;
       }
     } catch {
       // default
@@ -159,6 +165,17 @@ export class HudManager {
     this.sectorSizeButtons.forEach(btn => {
       const b = btn as HTMLElement;
       b.classList.toggle('active', parseInt(b.dataset.val || '0', 10) === this.currentSettings.sectorSize);
+    });
+
+    // Initial circle UI
+    if (this.initialCircleVal) {
+      this.initialCircleVal.textContent = this.currentSettings.initialCircle
+        ? '🐢 Круг 900м'
+        : '⚡ Быстрый старт';
+    }
+    this.initialCircleButtons.forEach(btn => {
+      const b = btn as HTMLElement;
+      b.classList.toggle('active', (b.dataset.val === 'true') === this.currentSettings.initialCircle);
     });
 
     // Concurrency UI
@@ -295,6 +312,17 @@ export class HudManager {
         this.currentSettings.sectorSize = val;
         this.applySettingsUI(this.currentSettings);
         callbacks.onSectorSizeChange?.(val);
+      });
+    });
+
+    // Initial Circle chips
+    this.initialCircleButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const enabled = (btn as HTMLElement).dataset.val === 'true';
+        this.currentSettings.initialCircle = enabled;
+        this.applySettingsUI(this.currentSettings);
+        callbacks.onInitialCircleChange?.(enabled);
       });
     });
 

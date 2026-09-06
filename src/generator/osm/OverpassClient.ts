@@ -95,17 +95,17 @@ export class OverpassClient {
 
         if (res.ok) {
           const data = await res.json();
-          const count = data.elements ? data.elements.length : 0;
-          if (count > 0) {
-            // Only cache verified non-empty datasets
+          if (data && Array.isArray(data.elements)) {
+            const count = data.elements.length;
             await this.cache.set(cacheKey, data);
             this.promoteMirror(mirror);
             const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-            console.log(`[Overpass] Sector loaded via ${new URL(mirror).hostname} (${count} features, ${duration}s)`);
+            if (count > 0) {
+              console.log(`[Overpass] Sector loaded via ${new URL(mirror).hostname} (${count} features, ${duration}s)`);
+            }
             return { success: true, fromCache: false, data };
           } else {
-            console.warn(`[Overpass] Mirror ${new URL(mirror).hostname} returned 0 elements, trying fallback mirror...`);
-            emptyResultData = data;
+            console.warn(`[Overpass] Mirror ${new URL(mirror).hostname} returned invalid JSON structure, trying next...`);
           }
         } else {
           console.warn(`[Overpass] Mirror ${new URL(mirror).hostname} responded with HTTP ${res.status}, trying next...`);

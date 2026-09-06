@@ -95,6 +95,9 @@ async function initApplication() {
     onChunksPerFrameChange: (batch: number) => {
       chunkManager.setMaxChunksPerFrame(batch);
     },
+    onInitialCircleChange: (enabled: boolean) => {
+      osmProvider.setInitialCircle(enabled);
+    },
     onReloadSectors: () => {
       osmProvider.reloadNearbySectors(camera.position.x, camera.position.z);
       chunkManager.clearAll();
@@ -108,6 +111,7 @@ async function initApplication() {
   // Apply restored stream settings to providers
   osmProvider.setSectorSize(hud.currentSettings.sectorSize);
   osmProvider.setConcurrency(hud.currentSettings.concurrency);
+  osmProvider.setInitialCircle(hud.currentSettings.initialCircle);
   chunkManager.setMaxChunksPerFrame(hud.currentSettings.chunksPerFrame);
 
   function updateRenderDistance(val: number): void {
