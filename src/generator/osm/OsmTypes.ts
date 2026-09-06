@@ -107,7 +107,20 @@ export interface OsmRoad extends BaseFeature {
 
 export interface OsmWater extends BaseFeature {
   type: 'water';
+  name: string | null;
+  waterType: string;
+  isPolygon: boolean;
+  isFountain?: boolean;
+  width: number;
   points: [number, number][];
+}
+
+export interface OsmRailway extends BaseFeature {
+  type: 'railway';
+  name: string | null;
+  railwayType: string;
+  points: [number, number][];
+  width: number;
 }
 
 export interface OsmArea extends BaseFeature {
@@ -115,7 +128,7 @@ export interface OsmArea extends BaseFeature {
   points: [number, number][];
 }
 
-export type OsmFeature = OsmPoi | OsmTree | OsmPeak | OsmBuilding | OsmRoad | OsmWater | OsmArea;
+export type OsmFeature = OsmPoi | OsmTree | OsmPeak | OsmBuilding | OsmRoad | OsmWater | OsmArea | OsmRailway;
 
 export interface InspectedFeatureInfo {
   id?: number | string;

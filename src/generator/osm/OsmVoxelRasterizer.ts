@@ -12,7 +12,8 @@ import {
   OsmArea,
   OsmPoi,
   OsmTree,
-  OsmPeak
+  OsmPeak,
+  OsmRailway
 } from './OsmTypes.js';
 import { GeoCoords } from './GeoCoords.js';
 
@@ -169,6 +170,66 @@ export class OsmVoxelRasterizer {
             }
           }
         }
+      } else if (feat.type === 'railway') {
+        const rail = feat as OsmRailway;
+        const isTram = rail.railwayType === 'tram';
+
+        for (let i = 0; i < rail.points.length - 1; i++) {
+          const p1 = rail.points[i];
+          const p2 = rail.points[i + 1];
+
+          const minPX = Math.min(p1[0], p2[0]) - rail.width;
+          const maxPX = Math.max(p1[0], p2[0]) + rail.width;
+          const minPZ = Math.min(p1[1], p2[1]) - rail.width;
+          const maxPZ = Math.max(p1[1], p2[1]) + rail.width;
+
+          if (maxPX < startX || minPX > endX || maxPZ < startZ || minPZ > endZ) continue;
+
+          hasFeatures = true;
+          const segDx = p2[0] - p1[0];
+          const segDz = p2[1] - p1[1];
+          const dist = Math.hypot(segDx, segDz);
+          if (dist === 0) continue;
+
+          const steps = Math.max(1, Math.ceil(dist / 1.0));
+
+          for (let s = 0; s <= steps; s++) {
+            const t = s / steps;
+            const rx = p1[0] + segDx * t;
+            const rz = p1[1] + segDz * t;
+
+            const lcx = Math.floor((rx - startX) / VOXEL_SIZE);
+            const lcz = Math.floor((rz - startZ) / VOXEL_SIZE);
+            const radiusVoxels = isTram ? 1 : Math.ceil(rail.width / (2 * VOXEL_SIZE));
+
+            // Crosstie (шпала) pattern: placed periodically along the track
+            const currentMeters = dist * t;
+            const isSleeper = (Math.floor(currentMeters / 2.0) % 2 === 0);
+
+            for (let ox = -radiusVoxels; ox <= radiusVoxels; ox++) {
+              for (let oz = -radiusVoxels; oz <= radiusVoxels; oz++) {
+                const vx = lcx + ox;
+                const vz = lcz + oz;
+                if (vx >= 0 && vx < CHUNK_SIZE_X && vz >= 0 && vz < CHUNK_SIZE_Z) {
+                  const isCenter = (ox === 0 && oz === 0);
+                  if (isTram) {
+                    // Street tram track: steel rail flush with road surface
+                    setBlock(vx, groundY, vz, isCenter ? BlockType.RAIL_STEEL : BlockType.ROAD);
+                  } else {
+                    // Sleeper & steel rail pattern over ballast
+                    if (isCenter) {
+                      setBlock(vx, groundY, vz, isSleeper ? BlockType.RAIL_SLEEPER : BlockType.RAIL_STEEL);
+                    } else if (Math.abs(ox) + Math.abs(oz) === 1) {
+                      setBlock(vx, groundY, vz, isSleeper ? BlockType.RAIL_SLEEPER : BlockType.RAIL_GRAVEL);
+                    } else {
+                      setBlock(vx, groundY, vz, BlockType.RAIL_GRAVEL);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       } else if (feat.type === 'park' || feat.type === 'forest') {
         const area = feat as OsmArea;
         const isForest = (area.type === 'forest');
@@ -222,15 +283,99 @@ export class OsmVoxelRasterizer {
           }
         }
       } else if (feat.type === 'water') {
-        const water = feat as any;
-        for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
-          const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
-          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-            const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
-            if (GeoCoords.pointInPolygon(worldVX, worldVZ, water.points)) {
-              hasFeatures = true;
-              for (let wy = groundY - 3; wy <= groundY; wy++) {
-                setBlock(lx, wy, lz, BlockType.WATER);
+        const water = feat as OsmWater;
+        if (water.isPolygon && water.points.length >= 3) {
+          // Closed true polygon (lake, pond, reservoir, fountain basin, riverbank)
+          const [minWX, minWZ, maxWX, maxWZ] = water.bounds;
+          if (maxWX < startX || minWX > endX || maxWZ < startZ || minWZ > endZ) continue;
+
+          if (water.isFountain) {
+            // Architectural Fountain Basin & Decorative Pool:
+            // Preserves ground foundation, adds stone border and shallow water with jets
+            for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+              const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+              for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+                const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+                if (GeoCoords.pointInPolygon(worldVX, worldVZ, water.points)) {
+                  hasFeatures = true;
+                  const isBorder = GeoCoords.isPerimeterVoxel(worldVX, worldVZ, water.points, VOXEL_SIZE);
+                  setBlock(lx, groundY, lz, BlockType.STONE);
+                  if (isBorder) {
+                    setBlock(lx, groundY + 1, lz, BlockType.STONE);
+                  } else {
+                    setBlock(lx, groundY + 1, lz, BlockType.WATER);
+                    // Rhythmic vertical water jets
+                    if ((lx + lz) % 10 === 0) {
+                      setBlock(lx, groundY + 2, lz, BlockType.WATER);
+                      setBlock(lx, groundY + 3, lz, BlockType.WATER);
+                    }
+                  }
+                }
+              }
+            }
+          } else {
+            // Natural open water (lake, pond, reservoir, riverbank basin)
+            for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+              const worldVX = startX + (lx + 0.5) * VOXEL_SIZE;
+              for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+                const worldVZ = startZ + (lz + 0.5) * VOXEL_SIZE;
+                if (GeoCoords.pointInPolygon(worldVX, worldVZ, water.points)) {
+                  hasFeatures = true;
+                  for (let wy = groundY - 3; wy <= groundY; wy++) {
+                    setBlock(lx, wy, lz, BlockType.WATER);
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          // Linear open river/canal/stream line (rasterized with realistic river width along polyline)
+          const riverWidth = water.width || 50;
+          for (let i = 0; i < water.points.length - 1; i++) {
+            const p1 = water.points[i];
+            const p2 = water.points[i + 1];
+
+            const minPX = Math.min(p1[0], p2[0]) - riverWidth;
+            const maxPX = Math.max(p1[0], p2[0]) + riverWidth;
+            const minPZ = Math.min(p1[1], p2[1]) - riverWidth;
+            const maxPZ = Math.max(p1[1], p2[1]) + riverWidth;
+
+            if (maxPX < startX || minPX > endX || maxPZ < startZ || minPZ > endZ) continue;
+
+            hasFeatures = true;
+            const segDx = p2[0] - p1[0];
+            const segDz = p2[1] - p1[1];
+            const dist = Math.hypot(segDx, segDz);
+            if (dist === 0) continue;
+
+            const steps = Math.max(1, Math.ceil(dist / 2.0));
+            const radiusVoxels = Math.ceil(riverWidth / (2 * VOXEL_SIZE));
+
+            for (let s = 0; s <= steps; s++) {
+              const t = s / steps;
+              const rx = p1[0] + segDx * t;
+              const rz = p1[1] + segDz * t;
+
+              const lcx = Math.floor((rx - startX) / VOXEL_SIZE);
+              const lcz = Math.floor((rz - startZ) / VOXEL_SIZE);
+
+              for (let ox = -radiusVoxels; ox <= radiusVoxels; ox++) {
+                for (let oz = -radiusVoxels; oz <= radiusVoxels; oz++) {
+                  if (ox * ox + oz * oz <= radiusVoxels * radiusVoxels) {
+                    const vx = lcx + ox;
+                    const vz = lcz + oz;
+                    if (vx >= 0 && vx < CHUNK_SIZE_X && vz >= 0 && vz < CHUNK_SIZE_Z) {
+                      if (water.isFountain) {
+                        setBlock(vx, groundY, vz, BlockType.STONE);
+                        setBlock(vx, groundY + 1, vz, BlockType.WATER);
+                      } else {
+                        for (let wy = groundY - 3; wy <= groundY; wy++) {
+                          setBlock(vx, wy, vz, BlockType.WATER);
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }

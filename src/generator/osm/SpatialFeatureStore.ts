@@ -5,6 +5,8 @@ import {
   OsmPoi,
   OsmTree,
   OsmPeak,
+  OsmWater,
+  OsmRailway,
   SubwayStation,
   InspectedFeatureInfo,
   SectorInfo
@@ -360,6 +362,69 @@ export class SpatialFeatureStore {
           height: Math.round(targetTree.height),
           buildingType: 'Дерево / Зеленые насаждения',
           amenity: 'tree',
+          pois: []
+        };
+      }
+
+      // Check if aiming at a real water body from OSM (rivers, lakes, canals, bays)
+      for (const feat of candidates) {
+        if (feat.type === 'water') {
+          const w = feat as OsmWater;
+          const isInside = w.points.length >= 3 && GeoCoords.pointInPolygon(worldX, worldZ, w.points);
+          const isNearCenterline = GeoCoords.distanceToPolygon(worldX, worldZ, w.points) <= 16;
+          if (isInside || isNearCenterline) {
+            const icon = w.isFountain ? '⛲' : '🌊';
+            const wTitle = w.name ? `${icon} ${w.name}` : `${icon} ${w.waterType}`;
+            const wSubtitle = w.name ? w.waterType : (nearestStreetName ? `ок. наб. ${nearestStreetName}` : (w.isFountain ? 'Городская площадь' : 'Водная акватория'));
+            return {
+              name: wTitle,
+              address: wSubtitle,
+              city: null,
+              levels: 0,
+              height: 0,
+              buildingType: w.waterType,
+              amenity: w.isFountain ? 'fountain' : 'water',
+              pois: []
+            };
+          }
+        }
+      }
+
+      // Check if aiming at a railway or tram line from OSM
+      for (const feat of candidates) {
+        if (feat.type === 'railway') {
+          const r = feat as OsmRailway;
+          const distToRail = GeoCoords.distanceToPolygon(worldX, worldZ, r.points);
+          if (distToRail <= (r.width / 2 + 3.0)) {
+            const isTram = r.railwayType === 'tram';
+            const rIcon = isTram ? '🚋' : '🚆';
+            const rType = isTram ? 'Трамвайная линия' : 'Железнодорожный путь (колея)';
+            const rTitle = r.name ? `${rIcon} ${r.name}` : `${rIcon} ${rType}`;
+            const rSubtitle = r.name ? rType : (nearestStreetName ? `ок. ${nearestStreetName}` : (isTram ? 'Городской рельсовый транспорт' : 'Магистральные железнодорожные пути'));
+            return {
+              name: rTitle,
+              address: rSubtitle,
+              city: null,
+              levels: 0,
+              height: 0,
+              buildingType: rType,
+              amenity: 'railway',
+              pois: []
+            };
+          }
+        }
+      }
+
+      // Check if aiming directly at a named road/street
+      if (nearestStreetName && minRoadDist <= 8.0) {
+        return {
+          name: `🛣️ ${nearestStreetName}`,
+          address: 'Городская улица / Проезжая часть',
+          city: null,
+          levels: 0,
+          height: 0,
+          buildingType: 'Улица / Дорога',
+          amenity: 'highway',
           pois: []
         };
       }

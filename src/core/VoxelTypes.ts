@@ -26,7 +26,10 @@ export enum BlockType {
   MONUMENT_BRONZE = 19,
   GOLD = 20,
   WARNING_YELLOW = 21,
-  WARNING_BLACK = 22
+  WARNING_BLACK = 22,
+  RAIL_GRAVEL = 23,
+  RAIL_SLEEPER = 24,
+  RAIL_STEEL = 25
 }
 
 // RGB Colors in [0..1] range for vertex colors
@@ -53,7 +56,10 @@ export const BlockPalette: Record<BlockType, [number, number, number]> = {
   [BlockType.MONUMENT_BRONZE]: [0.62, 0.46, 0.28],
   [BlockType.GOLD]: [0.95, 0.78, 0.24],
   [BlockType.WARNING_YELLOW]: [0.98, 0.80, 0.08], // Bright industrial warning yellow
-  [BlockType.WARNING_BLACK]: [0.10, 0.10, 0.12]  // Industrial hazard black
+  [BlockType.WARNING_BLACK]: [0.10, 0.10, 0.12],  // Industrial hazard black
+  [BlockType.RAIL_GRAVEL]: [0.48, 0.49, 0.52],    // Crushed stone railway ballast
+  [BlockType.RAIL_SLEEPER]: [0.26, 0.18, 0.12],   // Dark wooden/concrete crossties (шпалы)
+  [BlockType.RAIL_STEEL]: [0.84, 0.86, 0.90]      // Polished steel rail tracks (рельсы)
 };
 
 // Return whether block is transparent/non-solid to neighbor face culling

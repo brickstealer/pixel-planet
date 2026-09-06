@@ -7,6 +7,7 @@ import {
   OsmRoad,
   OsmWater,
   OsmArea,
+  OsmRailway,
   SubwayStation
 } from './OsmTypes.js';
 import { GeoCoords } from './GeoCoords.js';
@@ -495,13 +496,102 @@ export class OsmParser {
 
           store.addFeature(feature);
 
-        } else if (tags.waterway || tags.natural === 'water') {
+        } else if (tags.waterway || tags.natural === 'water' || tags.water || tags.amenity === 'fountain') {
+          // Identify architectural fountains & decorative reflecting pools
+          const isFountain = tags.amenity === 'fountain' ||
+            tags.water === 'fountain' ||
+            tags.water === 'reflecting_pool' ||
+            tags.waterway === 'fountain' ||
+            tags.fountain === 'yes';
+
+          // Skip underground rivers / culverts (e.g. Neglinnaya in Moscow, Fleet in London, Bièvre in Paris)
+          const isUndergroundWater = !isFountain && (
+            tags.tunnel === 'yes' ||
+            tags.tunnel === 'culvert' ||
+            tags.location === 'underground' ||
+            tags.covered === 'yes' ||
+            (tags.layer && parseInt(tags.layer, 10) < 0) ||
+            (tags.name && tags.name.toLowerCase().includes('неглинн'))
+          );
+
+          if (isUndergroundWater) {
+            continue;
+          }
+
+          let defaultFountainName: string | null = null;
+          if (isFountain) {
+            defaultFountainName = tags.tourism === 'attraction' ? 'Фонтан-достопримечательность' : 'Фонтанный комплекс';
+          }
+
+          const waterName = tags['name:ru'] || tags.name || tags['name:en'] || defaultFountainName;
+          let waterType = 'Водный объект';
+          if (isFountain) {
+            waterType = tags.tourism === 'attraction' ? 'Фонтан-достопримечательность' : 'Городской фонтан';
+          } else if (tags.waterway === 'river') waterType = 'Судоходная река';
+          else if (tags.waterway === 'canal') waterType = 'Судоходный канал';
+          else if (tags.waterway === 'stream' || tags.waterway === 'brook') waterType = 'Ручей / Речка';
+          else if (tags.water === 'lake' || tags.natural === 'water') waterType = 'Озеро';
+          else if (tags.water === 'pond') waterType = 'Городской пруд';
+          else if (tags.water === 'reservoir') waterType = 'Водохранилище';
+          else if (tags.natural === 'bay' || tags.water === 'bay') waterType = 'Морской залив / Бухта';
+          else if (tags.waterway) waterType = 'Река / Канал';
+
+          // Critical check: is this a closed polygon (lake/pond/riverbank area/fountain basin) or an open river centerline?
+          const isClosed = pts.length >= 4 && Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < 6.0;
+          const isPolygon = isClosed && (tags.natural === 'water' || tags.water || tags.waterway === 'riverbank' || tags.landuse === 'basin' || isFountain);
+
+          let riverWidth = 45;
+          if (tags.width) {
+            const parsedW = parseFloat(tags.width);
+            if (!isNaN(parsedW) && parsedW > 0) riverWidth = parsedW;
+          } else if (tags.waterway === 'river') {
+            riverWidth = 55;
+          } else if (tags.waterway === 'canal') {
+            riverWidth = 25;
+          } else if (tags.waterway === 'stream' || tags.waterway === 'brook') {
+            riverWidth = 6;
+          }
+
           const feature: OsmWater = {
             id: elem.id,
             type: 'water',
+            name: waterName,
+            waterType: waterType,
+            isPolygon,
+            isFountain,
+            width: riverWidth,
             points: pts,
             bounds: [minX, minZ, maxX, maxZ]
           };
+          store.addFeature(feature);
+
+        } else if (tags.railway && (tags.railway === 'rail' || tags.railway === 'tram' || tags.railway === 'light_rail' || tags.railway === 'subway' || tags.railway === 'narrow_gauge')) {
+          // Skip underground subway tunnels
+          const isUndergroundRail = tags.tunnel === 'yes' ||
+            tags.tunnel === 'culvert' ||
+            tags.location === 'underground' ||
+            (tags.layer && parseInt(tags.layer, 10) < 0) ||
+            (tags.railway === 'subway' && tags.cutting !== 'yes' && tags.bridge !== 'yes');
+
+          if (isUndergroundRail) {
+            continue;
+          }
+
+          let width = 4.0;
+          if (tags.railway === 'tram') width = 2.5;
+          else if (tags.railway === 'narrow_gauge') width = 3.0;
+
+          const rName = tags['name:ru'] || tags.name || tags['name:en'] || tags.ref || null;
+          const feature: OsmRailway = {
+            id: elem.id,
+            name: rName,
+            type: 'railway',
+            railwayType: tags.railway,
+            points: pts,
+            width: width,
+            bounds: [minX, minZ, maxX, maxZ]
+          };
+
           store.addFeature(feature);
 
         } else if (tags.natural === 'tree_row') {
